@@ -120,7 +120,7 @@ This skips the additional authentication needed to access PIM for Groups data.
 **Conditional Access Policies**  
 ![alt text](/images/caps.png)
 
-**Conditional Access Policies**  
+**Conditional Access Policies Details**  
 ![alt text](/images/caps_details.png)
 
 **Enumeration Summary**  
