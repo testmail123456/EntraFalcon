@@ -396,7 +396,7 @@ The following table roughly summarizes the checks performed, along with their im
 |Area|Check|Impacts Score|Warning Displayed|
 |-|-|-|-|
 |Groups|Is a public M365 group|Yes|Yes|
-|Groups|Is Dynamic / Is Dynamic and potential dangerous query|Yes|Yes|
+|Groups|Is Dynamic / Is Dynamic and potentially dangerous query|Yes|Yes|
 |Groups|Entra Roles (Active and Eligible)|Yes|Yes|
 |Groups|Azure Roles (Active and Eligible)|Yes|Yes|
 |Groups|Used for AppRole|Yes|Yes|
@@ -426,11 +426,9 @@ The following table roughly summarizes the checks performed, along with their im
 |EnterpriseApp|Owners|Yes|Yes|
 |EnterpriseApp|Ownership over App Registrations|Yes|Yes|
 |EnterpriseApp|Ownership of other Service Principals|Yes|Yes|
-|EnterpriseApp|Member / owner of groups|Yes|(Yes)|
-|EnterpriseApp|AppLock|Yes|Yes|
+|EnterpriseApp|AppLock|(Yes)|No|
 |EnterpriseApp|App owns AppRegistration|Yes|Yes|
-|EnterpriseApp|High privileges through group membership|Yes|Yes|
-|EnterpriseApp|High privileges through group ownership|Yes|Yes|
+|EnterpriseApp|Member / owner of groups|Yes|(Yes)|
 |EnterpriseApp|AppRoles|Yes|No|
 |EnterpriseApp|AppRole requirements|Yes|No|
 |EnterpriseApp|Inactive|No|No|
@@ -450,8 +448,6 @@ The following table roughly summarizes the checks performed, along with their im
 |ManagedIdentity|Ownership over App Registrations|Yes|Yes|
 |ManagedIdentity|Ownership of other Service Principals|Yes|Yes|
 |ManagedIdentity|Member / owner of groups|Yes|(Yes)|
-|ManagedIdentity|High privileges through group membership|Yes|Yes|
-|ManagedIdentity|High privileges through group ownership|Yes|Yes|
 |User|Entra Roles (Active and Eligible)|Yes|Yes|
 |User|Azure Roles (Active and Eligible)|Yes|Yes|
 |User|Privileged group membership (Active and Eligible)|Yes|Yes|
@@ -463,6 +459,7 @@ The following table roughly summarizes the checks performed, along with their im
 |User|No MFA-factor registered|Yes|Yes|
 |User|Is protected|Yes|No|
 |User|Inactive|No|No|
+|User|Member / owner of groups|Yes|(Yes)|
 |User|Synced from on-prem|Yes|No|
 |CAP|No or misconfigured policy for legacy authentication|-|Yes|
 |CAP|No or misconfigured policy for blocking device code flow|-|Yes|
