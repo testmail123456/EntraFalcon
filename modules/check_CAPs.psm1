@@ -769,8 +769,8 @@ function ConvertTo-Yaml {
             UserRisk = $policy.Conditions.UserRiskLevels.count
             AuthStrength = $AuthStrength
             AuthContext = $policy.Conditions.Applications.IncludeAuthenticationContextClassReferences.count
-            IncRecources = $IncludedResourcesCount
-            ExcRecources = $policy.Conditions.Applications.ExcludeApplications.count
+            IncResources = $IncludedResourcesCount
+            ExcResources = $policy.Conditions.Applications.ExcludeApplications.count
             IncNw = $IncludedNwLocations
             ExcNw = $ExcludedNwLocations
             IncPlatforms = $IncPlatforms
@@ -836,7 +836,7 @@ $MissingPolicies
     $DetailTxtBuilder = [System.Text.StringBuilder]::new()
     $AppendixNetworkLocations = ""
     #Define output of the main table
-    $tableOutput = $ConditionalAccessPolicies | select-object DisplayName,DisplayNameLink,State,IncRecources,ExcRecources,AuthContext,IncUsers,ExcUsers,IncGroups,ExcGroups,IncRoles,ExcRoles,IncExternals,ExcExternals,DeviceFilter,IncPlatforms,ExcPlatforms,SignInRisk,UserRisk,IncNw,ExcNw,AppTypes,AuthFlow,UserActions,GrantControls,AuthStrength,Warnings
+    $tableOutput = $ConditionalAccessPolicies | select-object DisplayName,DisplayNameLink,State,IncResources,ExcResources,AuthContext,IncUsers,ExcUsers,IncGroups,ExcGroups,IncRoles,ExcRoles,IncExternals,ExcExternals,DeviceFilter,IncPlatforms,ExcPlatforms,SignInRisk,UserRisk,IncNw,ExcNw,AppTypes,AuthFlow,UserActions,GrantControls,AuthStrength,Warnings
 
     #Build the detail section of the report
     foreach ($item in $AllPolicies) {
@@ -928,7 +928,7 @@ $MissingPolicies
     write-host ""
 
     if ($AllPoliciesCount -gt 0) {
-        $mainTable = $tableOutput | select-object -Property @{Label="DisplayName"; Expression={$_.DisplayNameLink}},State,IncRecources,ExcRecources,AuthContext,IncUsers,ExcUsers,IncGroups,ExcGroups,IncRoles,ExcRoles,IncExternals,ExcExternals,DeviceFilter,IncPlatforms,ExcPlatforms,SignInRisk,UserRisk,IncNw,ExcNw,AppTypes,AuthFlow,UserActions,GrantControls,AuthStrength,Warnings
+        $mainTable = $tableOutput | select-object -Property @{Label="DisplayName"; Expression={$_.DisplayNameLink}},State,IncResources,ExcResources,AuthContext,IncUsers,ExcUsers,IncGroups,ExcGroups,IncRoles,ExcRoles,IncExternals,ExcExternals,DeviceFilter,IncPlatforms,ExcPlatforms,SignInRisk,UserRisk,IncNw,ExcNw,AppTypes,AuthFlow,UserActions,GrantControls,AuthStrength,Warnings
         $mainTableJson  = $mainTable | ConvertTo-Json -Depth 10 -Compress       
     } else {
         #Define an empty JSON object to make the HTML report loading
@@ -987,9 +987,9 @@ Appendix: Network Location
     #Write TXT and CSV files
     $headerTXT | Out-File -Width 512 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt"
     if ($AllPoliciesCount -gt 0) { 
-        $tableOutput | select-object DisplayName,State,IncRecources,ExcRecources,AuthContext,IncUsers,ExcUsers,IncGroups,ExcGroups,IncRoles,ExcRoles,IncExternals,ExcExternals,DeviceFilter,IncPlatforms,ExcPlatforms,SignInRisk,UserRisk,IncNw,ExcNw,AppTypes,AuthFlow,UserActions,GrantControls,AuthStrength,Warnings | Export-Csv -Path "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).csv" -NoTypeInformation
+        $tableOutput | select-object DisplayName,State,IncResources,ExcResources,AuthContext,IncUsers,ExcUsers,IncGroups,ExcGroups,IncRoles,ExcRoles,IncExternals,ExcExternals,DeviceFilter,IncPlatforms,ExcPlatforms,SignInRisk,UserRisk,IncNw,ExcNw,AppTypes,AuthFlow,UserActions,GrantControls,AuthStrength,Warnings | Export-Csv -Path "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).csv" -NoTypeInformation
     }
-    $tableOutput | format-table -Property DisplayName,State,IncRecources,ExcRecources,AuthContext,IncUsers,ExcUsers,IncGroups,ExcGroups,IncRoles,ExcRoles,IncExternals,ExcExternals,DeviceFilter,IncPlatforms,ExcPlatforms,SignInRisk,UserRisk,IncNw,ExcNw,AppTypes,AuthFlow,UserActions,GrantControls,AuthStrength,Warnings | Out-File -Width 512 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
+    $tableOutput | format-table -Property DisplayName,State,IncResources,ExcResources,AuthContext,IncUsers,ExcUsers,IncGroups,ExcGroups,IncRoles,ExcRoles,IncExternals,ExcExternals,DeviceFilter,IncPlatforms,ExcPlatforms,SignInRisk,UserRisk,IncNw,ExcNw,AppTypes,AuthFlow,UserActions,GrantControls,AuthStrength,Warnings | Out-File -Width 512 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
     if ($Warnings.count -ge 1) {$Warnings | Out-File -Width 512 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append} 
     $DetailOutputTxt | Out-File -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
 

@@ -1605,7 +1605,7 @@ $global:GLOBALJavaScript = @'
 			const redIfTrueHeaders = new Set(['Foreign', 'Inactive', 'PIM', 'Dynamic', 'SecurityEnabled', 'OnPrem', 'Conditions', 'IsBuiltIn','IsPrivileged']);
 			const redIfFalseHeaders = new Set(['AppLock', 'MfaCap', 'Protected', 'Enabled', 'RoleAssignable']);
 			const redIfContent = new Set(['all', 'alltrusted', 'report-only', 'disabled', 'public', 'guest', 'customrole', 'active']);
-			const redIfContentHeaders = new Set(['IncUsers', 'IncRecources', 'IncNw', 'ExcNw', 'IncPlatforms', 'State', 'Visibility', 'UserType', 'RoleType', 'AssignmentType']);
+			const redIfContentHeaders = new Set(['IncUsers', 'IncResources', 'IncNw', 'ExcNw', 'IncPlatforms', 'State', 'Visibility', 'UserType', 'RoleType', 'AssignmentType']);
 
 			const redColor = isDark ? "#800000" : "#FFB6C1";
 			const greenColor = isDark ? "#005f00" : "#98FB98";
