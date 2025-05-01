@@ -350,6 +350,12 @@ $global:GLOBALJavaScript = @'
                         IncNw: "or_!=0",
                         ExcNw: "or_!=0"
                     }
+                },                
+                {
+                    label: "Session Control Policies",
+                    filters: {
+                        SessionControls: ">0"
+                    }
                 }
             ],
             "Role Assignments Entra ID": [
@@ -425,7 +431,7 @@ $global:GLOBALJavaScript = @'
         };
 
         //Define columns which are hidden by default
-        const defaultHidden = ["DeviceReg", "DeviceOwn", "LicenseStatus", "OwnersSynced", "DefaultMS", "AppRoleRequired", "RoleAssignable", "LastSignInDays", "CreatedDays"];
+        const defaultHidden = ["DeviceReg", "DeviceOwn", "LicenseStatus", "OwnersSynced", "DefaultMS", "AppRoleRequired", "RoleAssignable", "LastSignInDays", "CreatedDays",];
 
         // Function to obtain the GET parameters from the URL
         function getURLParams() {
