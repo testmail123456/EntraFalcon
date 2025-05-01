@@ -108,7 +108,8 @@ return @"
 
     # Generate chart sections
     $Chartsection += New-ChartSection -Title "Users" -Prefix "user" -ChartCount 6
-    $ChartsectionGroups += New-ChartSection -Title "Groups" -Prefix "group" -ChartCount 4
+    # Only include PIM chart if it's checked
+    if ($GLOBALPimForGroupsChecked) { $ChartsectionGroups += New-ChartSection -Title "Groups" -Prefix "group" -ChartCount 4} else {$ChartsectionGroups += New-ChartSection -Title "Groups" -Prefix "group" -ChartCount 3}
     $ChartsectionEnterpriseApps += New-ChartSection -Title "Enterprise Applications" -Prefix "enterpriseapps" -ChartCount 3
     $ChartsectionAppRegistrations += New-ChartSection -Title "App Registrations" -Prefix "appregistrations" -ChartCount 3
     $ChartsectionManagedIdentities += New-ChartSection -Title "Managed Identities" -Prefix "managedidentities" -ChartCount 2

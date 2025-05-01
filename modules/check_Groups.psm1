@@ -1818,7 +1818,7 @@ Appendix: Dynamic Groups
         if ($group.OnPrem) {
             $OnPremCount++
         }
-        if ($group.PIM) {
+        if ($group.PIM -eq $true) {
             $PimOnboarded++
         }       
     }
