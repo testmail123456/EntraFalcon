@@ -552,17 +552,17 @@ function Invoke-CheckUsers {
             $SpCountAppLockNo = 0
             foreach ($object in $SPOwnerDetails) {
                 $SpCount ++
-                if ($object.AppLock -eq $true) {
+                if ($object.AppLock -eq $false) {
                     #takeover impact from SP
                     $AddImpact += $object.Impact
                     $SpCountAppLock ++
-                } elseif ($object.AppLock -eq $false) {
+                } elseif ($object.AppLock -eq $true) {
                     $SpCountAppLockNo ++
                     #Otherwise, add SP impact or a base value (the lower one)
                     if ($object.Impact -le $UserImpact["SpOwnAppLock"]) {
-                        $object.Impact
+                        $AddImpact += $object.Impact
                     } else {
-                        $UserImpact["SpOwnAppLock"]
+                        $AddImpact += $UserImpact["SpOwnAppLock"]
                     }
                 } else {
                     $SpCountAppLockUnknown ++
