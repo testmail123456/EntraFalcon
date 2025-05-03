@@ -11,6 +11,7 @@ function Invoke-CheckCaps {
         [Parameter(Mandatory=$true)][Object[]]$CurrentTenant,
         [Parameter(Mandatory=$true)][String[]]$StartTimestamp,
         [Parameter(Mandatory=$true)][hashtable]$AllGroupsDetails,
+        [Parameter(Mandatory=$true)][hashtable]$TenantRoleAssignments,
         [Parameter(Mandatory=$true)][hashtable]$Users
     )
 
@@ -304,6 +305,46 @@ function ConvertTo-Yaml {
     }
     write-host "[+] Got $($($NamedLocations | Measure-Object).count) named locations"
 
+    # Pre-filter assignments with RoleTier 0 or 1
+    # Used to identify missing targeted high-tier roles
+    $HighTierAssignments = @()
+    foreach ($assignmentList in $TenantRoleAssignments.Values) {
+        foreach ($assignment in $assignmentList) {
+            if ($assignment.RoleTier -in 0, 1) {
+                $HighTierAssignments += $assignment
+            }
+        }
+    }
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Prepared HT HighTierAssignments $($HighTierAssignments.Count)"
+
+    # Hashtable to store scoped role info by RoleDefinitionId
+    # Used to identify scoped assignments which are not working in CAPs targeting roles
+    $ScopedAssignments = @{}
+    foreach ($assignmentList in $TenantRoleAssignments.Values) {
+        foreach ($assignment in $assignmentList) {
+            $scopeDisplay = $assignment.ScopeResolved.DisplayName
+
+            if ($scopeDisplay -ne '/') {
+                $roleId   = $assignment.RoleDefinitionId
+                $roleName = $assignment.DisplayName
+                $roleTier = $assignment.RoleTier
+
+                if (-not $ScopedAssignments.ContainsKey($roleId)) {
+                    $ScopedAssignments[$roleId] = @{
+                        RoleName = $roleName
+                        RoleTier = $roleTier
+                        Count    = 0
+                    }
+                }
+                $ScopedAssignments[$roleId]['Count']++
+            }
+        }
+    }
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Prepared HT ScopedAssignments $($ScopedAssignments.Count)"
+
+
+
+
     if ($AllPoliciesCount -gt 0) {
         #Get all Enterprise Apps to resolve GUIDs (fetching it again ensures MS apps are included)
         $QueryParameters = @{
@@ -315,6 +356,8 @@ function ConvertTo-Yaml {
         foreach ($app in $EnterpriseApps ) {
             $EnterpriseAppsHT[$app.AppId] = $app.DisplayName
         }
+
+        Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Prepared HT EnterpriseApps $($EnterpriseAppsHT.Count)"
         
         #Get all role templates to resolve GUIDs
         $QueryParameters = @{
@@ -326,6 +369,8 @@ function ConvertTo-Yaml {
         foreach ($role in $RoleTemplates ) {
             $RoleTemplatesHT[$role.Id] = $role.DisplayName
         }
+
+        Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Prepared HT RoleTemplates $($RoleTemplates.Count)"
     }
 
     ########################################## SECTION: Processing ##########################################
@@ -355,6 +400,7 @@ function ConvertTo-Yaml {
     foreach ($policy in $AllPolicies) {
         $ProgressCounter ++
         $WarningPolicy = ""
+        $ErrorMessages = @()
 
         # Display status based on the objects numbers (slightly improves performance)
         if ($ProgressCounter % $StatusUpdateInterval -eq 0 -or $ProgressCounter -eq $AllPoliciesCount) {
@@ -456,13 +502,89 @@ function ConvertTo-Yaml {
             }
         }
 
+        
+        # Check if there are used Entra role assignments (Tier 0 & 1) which are no in the IncludeRoles
+        $includedRoleIds = $policy.Conditions.Users.IncludeRoles
+        $unmatchedRoleCounts = @{}
+
+        # If 5 or more are targeted assuming all tier0 and tier1 roles should be included
+        if (@($includedRoleIds).count -ge 5) {
+            foreach ($assignment in $HighTierAssignments) {
+                $roleId   = $assignment.RoleDefinitionId
+                $roleName = $assignment.DisplayName
+                $roleTier = $assignment.RoleTier
+            
+                # Unmatched high-tier roles
+                if ($includedRoleIds -notcontains $roleId) {
+                    if (-not $unmatchedRoleCounts.ContainsKey($roleName)) {
+                        $unmatchedRoleCounts[$roleName] = @{
+                            Count = 0
+                            Tier  = $roleTier
+                        }
+                    }
+                    $unmatchedRoleCounts[$roleName]["Count"]++
+                }
+            }
+        }
+
+        #Check if there are roles targetd which have a scoped assignment
+        $ScopedRolesInPolicy = @()
+        $seenScopedRoleIds = @()        
+        foreach ($roleId in $includedRoleIds) {
+            if ($ScopedAssignments.ContainsKey($roleId) -and $seenScopedRoleIds -notcontains $roleId) {
+                $seenScopedRoleIds += $roleId
+        
+                $info = $ScopedAssignments[$roleId]
+                $ScopedRolesInPolicy += [PSCustomObject]@{
+                    RoleName              = $info.RoleName
+                    RoleTier              = $info.RoleTier
+                    Assignments           = $info.Count
+                }
+            }
+        }
+
+        #Store missing roles in a var
+        $MissingRolesTable = @()
+        if ($unmatchedRoleCounts.Count -ne 0) {
+            $MissingRolesTable = $unmatchedRoleCounts.GetEnumerator() |
+                ForEach-Object {
+                    [PSCustomObject]@{
+                        RoleName    = $_.Key
+                        RoleTier    = $_.Value.Tier
+                        Assignments = $_.Value.Count
+                    }
+                } | Sort-Object RoleTier, RoleName
+
+            $tier0Count = @($unmatchedRoleCounts.Values | Where-Object { $_.Tier -eq 0 }).Count
+            $tier1Count = @($unmatchedRoleCounts.Values | Where-Object { $_.Tier -eq 1 }).Count
+            
+            $parts = @()
+            if ($tier0Count -gt 0) { $parts += "Tier-0: $tier0Count" }
+            if ($tier1Count -gt 0) { $parts += "Tier-1: $tier1Count" }
+            
+            if ($parts.Count -gt 0) {
+                $MissingRolesWarning = "missing used roles (" + ($parts -join " / ") + ")"
+            }
+        }
+
+        #Generate error meassge
+        if ($ScopedRolesInPolicy.Count -gt 0) {
+            $targetedCount = @($includedRoleIds).Count
+            $scopedCount   = @($ScopedRolesInPolicy).Count
+
+            $roleWord = if ($targetedCount -eq 1) { "role" } else { "roles" }
+            $assignmentWord = if ($scopedCount -eq 1) { "scoped assignment" } else { "scoped assignments" }
+
+            $ScopedRolesWarning = "targeting $targetedCount $roleWord includes $scopedCount $assignmentWord"
+        }
+
 
         ###################### Analyzing policies
 
         $ExcludedObjects = $policy.Conditions.Users.ExcludeUsers.count + $policy.Conditions.Users.ExcludeGroups.count + $policy.Conditions.Users.ExcludeRoles.count + $ExcludedExternalUsersCount
         #Count the conditions. For certain policies like blocking the device code the value should be <= 1 otherwise the policy is weakened
         $ConditionsCount = $policy.Conditions.Devices.DeviceFilter.rule.count + $IncPlatformsCount + $ExcPlatforms + $policy.Conditions.SignInRiskLevels.count + $policy.Conditions.UserRiskLevels.count + $IncludedNwLocationsCount + $ExcludedNwLocationsCount + $ClientAppTypesCount + $policy.Conditions.AuthenticationFlows.TransferMethods.count
-        
+
         #Check policy for DeviceCodeFlow
         if ($policy.Conditions.AuthenticationFlows.TransferMethods -match "deviceCodeFlow") {
             $PolicyDeviceCodeFlow = $true
@@ -485,6 +607,10 @@ function ConvertTo-Yaml {
                 $ErrorMessages += "is not targeting all users"
                 $DeviceCodeFlowWarnings++
             }
+            if ($unmatchedRoleCounts.Count -ne 0) {
+                $ErrorMessages += $MissingRolesWarning
+                $DeviceCodeFlowWarnings++            
+            }
             if ($ExcludedObjects -gt 0) {
                 $ErrorMessages += "has $ExcludedObjects excluded objects"
                 $DeviceCodeFlowWarnings++
@@ -497,7 +623,7 @@ function ConvertTo-Yaml {
                 $WarningPolicy += "Targeting DeviceCodeFlow but " + ($ErrorMessages -join ", ")
             }
         }
-        
+
         #Check policy for blocking legacy authentication
         if ($policy.Conditions.ClientAppTypes -contains "exchangeActiveSync" -and $policy.Conditions.ClientAppTypes -contains "other") {
             $PolicyLegacyAuth = $true
@@ -519,6 +645,10 @@ function ConvertTo-Yaml {
             if ($null -eq $IncludedUserCount -or $IncludedUserCount -ne "All") {
                 $ErrorMessages += "is not targeting all users"
                 $LegacyAuthWarnings++
+            }
+            if ($unmatchedRoleCounts.Count -ne 0) {
+                $ErrorMessages += $MissingRolesWarning
+                $LegacyAuthWarnings++           
             }
             if ($ExcludedObjects -ne 0) {
                 $ErrorMessages += "has $ExcludedObjects excluded objects"
@@ -552,6 +682,10 @@ function ConvertTo-Yaml {
                 $ErrorMessages += "is not targeting all users"
                 $SignInRiskWarnings++
             }
+            if ($unmatchedRoleCounts.Count -ne 0) {
+                $ErrorMessages += $MissingRolesWarning
+                $SignInRiskWarnings++            
+            }
             if ($ExcludedObjects -gt 0) {
                 $ErrorMessages += "has $ExcludedObjects excluded objects"
                 $SignInRiskWarnings++
@@ -583,6 +717,10 @@ function ConvertTo-Yaml {
             if ($null -eq $IncludedUserCount -or $IncludedUserCount -ne "All") {
                 $ErrorMessages += "is not targeting all users"
                 $UserRiskWarnings++
+            }
+            if ($unmatchedRoleCounts.Count -ne 0) {
+                $ErrorMessages += $MissingRolesWarning
+                $UserRiskWarnings++          
             }
             if ($ExcludedObjects -gt 0) {
                 $ErrorMessages += "has $ExcludedObjects excluded objects"
@@ -618,6 +756,10 @@ function ConvertTo-Yaml {
                 $ErrorMessages += "is not targeting all users"
                 $CombinedRiskWarnings++
             }
+            if ($unmatchedRoleCounts.Count -ne 0) {
+                $ErrorMessages += $MissingRolesWarning
+                $CombinedRiskWarnings++         
+            }
             if ($ExcludedObjects -gt 0) {
                 $ErrorMessages += "has $ExcludedObjects excluded objects"
                 $CombinedRiskWarnings++
@@ -650,6 +792,10 @@ function ConvertTo-Yaml {
                 $ErrorMessages += "is not targeting all users"
                 $RegisterSecInfosWarnings++
             }
+            if ($unmatchedRoleCounts.Count -ne 0) {
+                $ErrorMessages += $MissingRolesWarning
+                $RegisterSecInfosWarnings++          
+            }
             if ($ConditionsCount -gt 1) {
                 $ErrorMessages += "has multiple ($ConditionsCount) conditions"
                 $RegisterSecInfosWarnings++
@@ -678,6 +824,10 @@ function ConvertTo-Yaml {
                 $ErrorMessages += "is not targeting all users"
                 $RegisterDevicesInfosWarnings++
             }
+            if ($unmatchedRoleCounts.Count -ne 0) {
+                $ErrorMessages += $MissingRolesWarning
+                $RegisterDevicesInfosWarnings++              
+            }
             if ($ConditionsCount -gt 1) {
                 $ErrorMessages += "has multiple ($ConditionsCount) conditions"
                 $RegisterDevicesInfosWarnings++
@@ -704,6 +854,10 @@ function ConvertTo-Yaml {
             }
             if ($null -eq $IncludedUserCount -or $IncludedUserCount -ne "All") {
                 $ErrorMessages += "is not targeting all users"
+                $UserMfaWarnings++
+            }
+            if ($unmatchedRoleCounts.Count -ne 0) {
+                $ErrorMessages += $MissingRolesWarning
                 $UserMfaWarnings++
             }
             if ($ExcludedObjects -gt 0) {
@@ -738,6 +892,10 @@ function ConvertTo-Yaml {
                 $ErrorMessages += "has $ExcludedObjects excluded objects"
                 $AuthStrengthWarnings++
             }
+            if ($unmatchedRoleCounts.Count -ne 0) {
+                $ErrorMessages += $MissingRolesWarning
+                $AuthStrengthWarnings++              
+            }
             if ($ConditionsCount -gt 1) {
                 $ErrorMessages += "has multiple ($ConditionsCount) conditions"
                 $AuthStrengthWarnings++
@@ -747,6 +905,18 @@ function ConvertTo-Yaml {
                 $WarningPolicy += "Requires AuthStrength (no AuthContext) but " + ($ErrorMessages -join ", ")
             }
         }
+
+        #General Policy checks
+        
+        #Check if the role includes roles but scope assignment exist for the role
+        if ($ScopedRolesInPolicy.Count -gt 0) {
+            if (-not [string]::IsNullOrWhiteSpace($WarningPolicy)) {
+                $WarningPolicy += ", $ScopedRolesWarning"
+            } else {
+                $WarningPolicy = $ScopedRolesWarning
+            }
+        }
+
 
         #Avoid $AuthStrength to be null
         if ($null -eq $policy.GrantControls.AuthenticationStrength.DisplayName) {
@@ -783,6 +953,8 @@ function ConvertTo-Yaml {
             ExcNw = $ExcludedNwLocations
             IncPlatforms = $IncPlatforms
             ExcPlatforms = $ExcPlatforms
+            MissingRoles = $MissingRolesTable
+            ScopedRolesInPolicy = $ScopedRolesInPolicy
             GrantControls = $policy.GrantControls.BuiltInControls -join " $($policy.GrantControls.Operator) "
             AuthFlow = (($policy.Conditions.AuthenticationFlows.TransferMethods -join ',') -replace '\s*,\s*', ', ')
             SessionControlsDetails = $policy.SessionControls
@@ -853,6 +1025,8 @@ $MissingPolicies
         $HtmlConditions = @()
         $HtmlSessionControls = @()
         $HtmlGrantControls = @()
+        $MissingRoles = @()
+        $ScopedRolesInPolicy = @()
  
         [void]$DetailTxtBuilder.AppendLine("############################################################################################################################################")
 
@@ -860,9 +1034,12 @@ $MissingPolicies
             "Policy Name" = $($item.DisplayName)
             "ID" = $($item.Id)
             "State" = $($item.State)
-            "Created" = $($item.CreatedDateTime.ToString())
-          }
+        }
         
+        #Sometimes even $item.CreatedDateTime is $null
+        if ($null -ne $item.CreatedDateTime) {
+            $ReportingCapInfo | Add-Member -NotePropertyName Created -NotePropertyValue $item.CreatedDateTime.ToString()
+        }
         if ($null -ne $item.ModifiedDateTime) {
             $ReportingCapInfo | Add-Member -NotePropertyName Modified -NotePropertyValue $item.ModifiedDateTime.ToString()
         }
@@ -876,7 +1053,61 @@ $MissingPolicies
             $ReportingCapInfo | Add-Member -NotePropertyName Warnings -NotePropertyValue $matchingWarnings
         }
        
-        [void]$DetailTxtBuilder.AppendLine(($ReportingCapInfo | Out-String))
+        [void]$DetailTxtBuilder.AppendLine(($ReportingCapInfo | format-table | Out-String))
+
+
+        ############### Missing Roles
+        $policy = $ConditionalAccessPolicies | where-object { $item.Id -eq $_.id}
+        if ($policy.MissingRoles.count -ge 1) {
+
+            $MissingRoles = foreach ($object in $($policy.MissingRoles)) {
+                [pscustomobject]@{ 
+                  "RoleName" = $($object.RoleName)
+                  "RoleTier" = $($object.RoleTier)
+                  "AssignmentsLink" = "<a href=Role_Assignments_Entra_$($StartTimestamp)_$($CurrentTenant.DisplayName).html?Role=$([System.Uri]::EscapeDataString("=$($object.RoleName)"))>$($object.Assignments)</a>"
+                  "Assignments" = $($object.Assignments)
+              }
+            }
+            [void]$DetailTxtBuilder.AppendLine("Missing Roles With Assignments")
+            [void]$DetailTxtBuilder.AppendLine("--------------------------------")
+            [void]$DetailTxtBuilder.AppendLine(($policy.MissingRoles  | format-table -Property RoleName,RoleTier,Assignments | Out-String))
+
+            #Rebuild for HTML report
+            $MissingRoles = foreach ($object in $MissingRoles) {
+                [pscustomobject]@{
+                    "RoleName" = $($object.RoleName)
+                    "RoleTier" = $($object.RoleTier)
+                    "Assignments" = $($object.AssignmentsLink)
+                }
+            }
+            
+        } 
+        
+        ############### Missing Roles
+        if ($policy.ScopedRolesInPolicy.count -ge 1) {
+
+            $ScopedRolesInPolicy = foreach ($object in $($policy.ScopedRolesInPolicy)) {
+                [pscustomobject]@{ 
+                  "RoleName" = $($object.RoleName)
+                  "RoleTier" = $($object.RoleTier)
+                  "AssignmentsScopedLink" = "<a href=Role_Assignments_Entra_$($StartTimestamp)_$($CurrentTenant.DisplayName).html?Role=$([System.Uri]::EscapeDataString("=$($object.RoleName)"))&Scope=$([System.Uri]::EscapeDataString("!(Tenant)"))>$($object.Assignments)</a>"
+                  "AssignmentsScoped" = $($object.Assignments)
+              }
+            }
+            [void]$DetailTxtBuilder.AppendLine("Targeted Roles With Scoped Assignments")
+            [void]$DetailTxtBuilder.AppendLine("------------------------------------------")
+            [void]$DetailTxtBuilder.AppendLine(($policy.ScopedRolesInPolicy  | format-table -Property RoleName,RoleTier,AssignmentsScoped | Out-String))
+
+            #Rebuild for HTML report
+            $ScopedRolesInPolicy = foreach ($object in $ScopedRolesInPolicy) {
+                [pscustomobject]@{
+                    "RoleName" = $($object.RoleName)
+                    "RoleTier" = $($object.RoleTier)
+                    "AssignmentsScoped" = $($object.AssignmentsScopedLink)
+                }
+            }
+        } 
+        
 
         # Convert the raw CAP JSON to YAML, enriching it with HTTP links.
         if ($null -ne $item.Conditions) {
@@ -921,12 +1152,14 @@ $MissingPolicies
         }
 
         $ObjectDetails = [pscustomobject]@{
-            "Object Name"           = $item.DisplayName
-            "Object ID"             = $item.Id
-            "General Information"    = $ReportingCapInfo
-            "Conditions"            = $HtmlConditions
-            "Session Controls"      = $HtmlSessionControls
-            "Grant Controls"        = $HtmlGrantControls 
+            "Object Name"                               = $item.DisplayName
+            "Object ID"                                 = $item.Id
+            "General Information"                       = $ReportingCapInfo
+            "Missing Roles With Assignments"            = $MissingRoles
+            "Targeted Roles With Scoped Assignments"    = $ScopedRolesInPolicy
+            "Conditions"                                = $HtmlConditions
+            "Session Controls"                          = $HtmlSessionControls
+            "Grant Controls"                            = $HtmlGrantControls 
         }
     
         [void]$AllObjectDetailsHTML.Add($ObjectDetails)
@@ -994,12 +1227,12 @@ Appendix: Network Location
     $headerHTML = $headerHTML | ConvertTo-Html -Fragment -PreContent "<div id=`"loadingOverlay`"><div class=`"spinner`"></div><div class=`"loading-text`">Loading data...</div></div><nav id=`"topNav`"></nav><h1>$($Title) Enumeration</h1>" -As List -PostContent "<h2>$($Title) Overview</h2>"
   
     #Write TXT and CSV files
-    $headerTXT | Out-File -Width 512 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt"
+    $headerTXT | Out-File -Width 768 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt"
     if ($AllPoliciesCount -gt 0) { 
         $tableOutput | select-object DisplayName,State,IncResources,ExcResources,AuthContext,IncUsers,ExcUsers,IncGroups,ExcGroups,IncRoles,ExcRoles,IncExternals,ExcExternals,DeviceFilter,IncPlatforms,ExcPlatforms,SignInRisk,UserRisk,IncNw,ExcNw,AppTypes,AuthFlow,UserActions,GrantControls,SessionControls,AuthStrength,Warnings | Export-Csv -Path "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).csv" -NoTypeInformation
     }
-    $tableOutput | format-table -Property DisplayName,State,IncResources,ExcResources,AuthContext,IncUsers,ExcUsers,IncGroups,ExcGroups,IncRoles,ExcRoles,IncExternals,ExcExternals,DeviceFilter,IncPlatforms,ExcPlatforms,SignInRisk,UserRisk,IncNw,ExcNw,AppTypes,AuthFlow,UserActions,GrantControls,SessionControls,AuthStrength,Warnings | Out-File -Width 512 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
-    if ($Warnings.count -ge 1) {$Warnings | Out-File -Width 512 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append} 
+    $tableOutput | format-table -Property DisplayName,State,IncResources,ExcResources,AuthContext,IncUsers,ExcUsers,IncGroups,ExcGroups,IncRoles,ExcRoles,IncExternals,ExcExternals,DeviceFilter,IncPlatforms,ExcPlatforms,SignInRisk,UserRisk,IncNw,ExcNw,AppTypes,AuthFlow,UserActions,GrantControls,SessionControls,AuthStrength,Warnings | Out-File -Width 768 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
+    if ($Warnings.count -ge 1) {$Warnings | Out-File -Width 768 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append} 
     $DetailOutputTxt | Out-File -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
 
 

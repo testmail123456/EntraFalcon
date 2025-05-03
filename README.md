@@ -468,6 +468,7 @@ The following table roughly summarizes the checks performed, along with their im
 |CAP|No or misconfigured policy for targeting user risk|-|Yes|
 |CAP|No or misconfigured policy enforcing MFA|-|Yes|
 |CAP|No policy enforcing Authentication Strength|-|Yes|
+|CAP|Inclusion of roles which have scoped assignments|-|Yes|
 </details>
 
 ## 🛡️ Detection
