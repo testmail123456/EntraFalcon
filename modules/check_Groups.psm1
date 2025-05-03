@@ -58,6 +58,8 @@ function Invoke-CheckGroups {
 
     ############################## Script section ########################
 
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Start group script"
+
     # Check token and trigger refresh if required
     if (-not (Invoke-CheckTokenExpiration $GLOBALmsGraphAccessToken)) { RefreshAuthenticationMsGraph | Out-Null}
 
@@ -101,7 +103,7 @@ function Invoke-CheckGroups {
 
     
     if ($TenantPimForGroupsAssignments) {
-
+        Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Processing $($TenantPimForGroupsAssignments.Count) PIM for Groups Assignments"
         # Hashtable for all owners for faster lookup in each group
         $PimForGroupsEligibleOwnersHT = @{}
         $PimForGroupsEligibleOwnerParentGroupHT = @{}
@@ -253,10 +255,12 @@ function Invoke-CheckGroups {
     $AllGroupsHT = @{}
     foreach ($group in $AllGroups) {
         $id = $group.id
+        $DisplayName = $group.DisplayName
         $securityEnabled = $group.securityEnabled
         $isAssignableToRole = if ($null -eq $group.isAssignableToRole) { $false } else { $group.isAssignableToRole }
 
         $AllGroupsHT[$id] = [PSCustomObject]@{
+            DisplayName    = $DisplayName
             securityEnabled     = $securityEnabled
             isAssignableToRole  = $isAssignableToRole
         }
@@ -295,7 +299,9 @@ function Invoke-CheckGroups {
             $TransitiveMembersRaw[$item.id] = $item.response.value
         }
     }
-    
+
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Got $($TransitiveMembersRaw.Count) group memberships"
+
     #Check token validity to ensure it will not expire in the next 30 minutes
     if (-not (Invoke-CheckTokenExpiration $GLOBALmsGraphAccessToken)) { RefreshAuthenticationMsGraph | Out-Null}
 
@@ -317,6 +323,8 @@ function Invoke-CheckGroups {
             $GroupOwnersRaw[$item.id] = $item.response.value
         }
     }
+
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Got $($GroupOwnersRaw.Count) group ownerships"
 
     #Check token validity to ensure it will not expire in the next 30 minutes
     if (-not (Invoke-CheckTokenExpiration $GLOBALmsGraphAccessToken)) { RefreshAuthenticationMsGraph | Out-Null}
@@ -340,6 +348,8 @@ function Invoke-CheckGroups {
         }
     }
 
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Got $($AppRoleAssignmentsRaw.Count) group role assignments"
+
     #Check token validity to ensure it will not expire in the next 30 minutes
     if (-not (Invoke-CheckTokenExpiration $GLOBALmsGraphAccessToken)) { RefreshAuthenticationMsGraph | Out-Null}
     
@@ -361,6 +371,7 @@ function Invoke-CheckGroups {
             $GroupNestedInRaw[$item.id] = $item.response.value
         }
     }
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Got $($GroupNestedInRaw.Count) group nestings"
 
     #Calc dynamic update interval
     $StatusUpdateInterval = [Math]::Max([Math]::Floor($GroupsTotalCount / 10), 1)
@@ -1044,6 +1055,7 @@ function Invoke-CheckGroups {
 
     # Reprocessing nested groups in groups which give access to potential critical ressources -> Nested group is adjusted
     # Note: Nested groups do not inherit AppRoles
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Processing $($NestedGroupsHighvalue.Count) high value groups"
     foreach ($highValueGroup in $NestedGroupsHighvalue) {
 
         # Split Targets into an array (in case of multiple IDs separated by commas)
@@ -1093,18 +1105,30 @@ function Invoke-CheckGroups {
         }
     }
 
+    #Create a hastable for faster lookup
+    $GroupLookup = @{}
+    foreach ($group in $AllGroupsDetails) {
+        $GroupLookup[$group.Id] = $group
+    }
+
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Get groups with nestings"
     #Reprocessing groups which have a nested group to include their owners  -> Parent group is adjusted
-    $GroupsWithNestings = $AllGroupsDetails | Where-Object { $_.NestedGroups -ge 1 } | select-object Id,Displayname,NestedGroupsDetails
-    #$Group = $GroupsWithNestings | where-object id -eq "77ba9227-08d0-4d0a-9885-f52bbd3f1634"
+    $GroupsWithNestings = $AllGroupsDetails | Where-Object { $_.NestedGroups -ge 1 }
+
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Processing $($GroupsWithNestings.Count) groups with nesting"
 
     foreach ($Group in $GroupsWithNestings) {
+
+        Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "1 Processing: $($Group.Displayname) Nestings: $($Group.NestedGroupsDetails.Count)"
+
         # $nestedGroup = $Group.NestedGroupsDetails
         foreach ($nestedGroup in $Group.NestedGroupsDetails) {
 
+
             # Matching group = nested group
-            $matchingGroup = $AllGroupsDetails | Where-Object { $_.Id -eq $nestedGroup.Id }
+            $matchingGroup = $GroupLookup[$nestedGroup.Id]
             #Target group = parent group (will be adjusted)
-            $targetGroup = $AllGroupsDetails | Where-Object { $_.Id -eq $Group.Id }
+            $targetGroup = $GroupLookup[$Group.Id]
 
             #Detecting risky nesting
             if ($targetGroup.Protected -and -not $matchingGroup.Protected) {
@@ -1142,8 +1166,14 @@ function Invoke-CheckGroups {
             }
             #Takeover likelihood score from nested group and updated the risk
             if ($matchingGroup) {
-                $targetGroup.Likelihood += [math]::Round($matchingGroup.Likelihood,1)
-                $targetGroup.Risk = [math]::Ceiling($targetGroup.Likelihood * $targetGroup.Impact)
+                ##Todo remove
+                try {
+                    $targetGroup.Likelihood += [math]::Round($matchingGroup.Likelihood,1)
+                    $targetGroup.Risk = [math]::Ceiling($targetGroup.Likelihood * $targetGroup.Impact)
+                }
+                catch {
+                }
+                
             }
         }
 
