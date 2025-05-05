@@ -756,7 +756,7 @@ function Invoke-CheckUsers {
         #Check app roles for sensitive keywords
         if ($UserDirectAppRolesCount -ge 1){
             $keywords = @("admin", "critical")
-            $SensitiveCounter = 1
+            $SensitiveCounter = 0
 
             $UserDirectAppRoles | ForEach-Object {
                 $matchFound = $false

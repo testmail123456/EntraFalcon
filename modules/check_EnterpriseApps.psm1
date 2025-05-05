@@ -299,34 +299,55 @@ function Invoke-CheckEnterpriseApps {
     ########################################## SECTION: Enterprise App Processing ##########################################
 
 
-    
-    #Enumerate all AppRoles configured (only of the apps in scope)
-    $AppRoles    	= [System.Collections.ArrayList]::new()
-    foreach ($item in $EnterpriseApps) {
 
-        if ($null -ne $item.AppRoles) {
-            $roles_user = $item.AppRoles | Where-Object {$_.AllowedMemberTypes -contains "User"} | select-object id,DisplayName,Description,IsEnabled,Value
-            foreach ($role in $roles_user) {
-                #Check if group has an app role 
-                if ($AppRolesAssignedToRaw.ContainsKey($item.Id)) {
-                    foreach ($assignment in $AppRolesAssignedToRaw[$item.Id]) {
-                        [void]$AppRoles.Add(
-                            [PSCustomObject]@{
-                                AppID = $item.Id
-                                AppName = $item.DisplayName
-                                AppRoleId = $role.id
-                                AppRoleAssignmentDisplayName = $assignment.PrincipalDisplayName
-                                AppRoleAssignmentPrincipalId = $assignment.PrincipalId 
-                                AppRoleAssignmentType = $assignment.PrincipalType
-                                AppRoleValue = $role.Value
-                                AppRoleDisplayName = $role.DisplayName
-                                AppRoleDescription = $role.Description
-                                AppRoleEnabled = $role.IsEnabled
-                            }
-                        )
-                    }
+
+    #Enumerate all AppRoles configured (only of the apps in scope)
+    $AppRoles = [System.Collections.ArrayList]::new()
+    
+    foreach ($app in $EnterpriseApps) {
+        if (-not $AppRolesAssignedToRaw.ContainsKey($app.Id)) { continue }
+    
+        $userRoles = $app.AppRoles | Where-Object { $_.AllowedMemberTypes -contains 'User' }
+    
+        foreach ($assignment in $AppRolesAssignedToRaw[$app.Id]) {
+            
+            # Handle default access assignments
+            if ($assignment.appRoleId -eq '00000000-0000-0000-0000-000000000000') {
+                [void]$AppRoles.Add([PSCustomObject]@{
+                    AppID                         = $app.Id
+                    AppName                       = $app.DisplayName
+                    AppRoleId                     = $assignment.appRoleId
+                    AppRoleAssignmentDisplayName  = $assignment.PrincipalDisplayName
+                    AppRoleAssignmentPrincipalId  = $assignment.PrincipalId
+                    AppRoleAssignmentType         = $assignment.PrincipalType
+                    AppRoleValue                  = $null
+                    AppRoleDisplayName            = "Default Access"
+                    AppRoleDescription            = "Default app role"
+                    AppRoleEnabled                = $false
+                })
+                continue
+            }
+    
+            # Handle explicitly assigned roles
+            $matchedRole = $userRoles | Where-Object { $_.Id -eq $assignment.appRoleId }
+    
+            if ($matchedRole) {
+                foreach ($role in $matchedRole) {
+                    [void]$AppRoles.Add([PSCustomObject]@{
+                        AppID                         = $app.Id
+                        AppName                       = $app.DisplayName
+                        AppRoleId                     = $role.Id
+                        AppRoleAssignmentDisplayName  = $assignment.PrincipalDisplayName
+                        AppRoleAssignmentPrincipalId  = $assignment.PrincipalId
+                        AppRoleAssignmentType         = $assignment.PrincipalType
+                        AppRoleValue                  = $role.Value
+                        AppRoleDisplayName            = $role.DisplayName
+                        AppRoleDescription            = $role.Description
+                        AppRoleEnabled                = $role.IsEnabled
+                    })
                 }
-               
+            } else {
+                Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "No matching AppRole for ID $($assignment.appRoleId) in App $($app.DisplayName)"
             }
         }
     }
