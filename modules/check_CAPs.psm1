@@ -625,7 +625,7 @@ function ConvertTo-Yaml {
         }
 
         #Check policy for blocking legacy authentication
-        if ($policy.Conditions.ClientAppTypes -contains "exchangeActiveSync" -and $policy.Conditions.ClientAppTypes -contains "other") {
+        if ($policy.Conditions.ClientAppTypes -contains "exchangeActiveSync" -and $policy.Conditions.ClientAppTypes -contains "other" -and -not ($policy.Conditions.ClientAppTypes -contains "browser") -and -not ($policy.Conditions.ClientAppTypes -contains "mobileAppsAndDesktopClients")) {
             $PolicyLegacyAuth = $true
             $LegacyAuthWarnings = 0
             $ErrorMessages = @()
