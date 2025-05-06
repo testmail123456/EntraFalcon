@@ -572,10 +572,10 @@ function ConvertTo-Yaml {
             $targetedCount = @($includedRoleIds).Count
             $scopedCount   = @($ScopedRolesInPolicy).Count
 
-            $roleWord = if ($targetedCount -eq 1) { "role" } else { "roles" }
-            $assignmentWord = if ($scopedCount -eq 1) { "scoped assignment" } else { "scoped assignments" }
+            $roleWord = if ($targetedCount -eq 1) { "targeted role" } else { "targeted roles" }
+            $assignmentWord = if ($scopedCount -eq 1) { "has scoped assignments" } else { "have scoped assignments" }
 
-            $ScopedRolesWarning = "targeting $targetedCount $roleWord includes $scopedCount $assignmentWord"
+            $ScopedRolesWarning = "$scopedCount of the $targetedCount $roleWord $assignmentWord"
         }
 
 
@@ -975,28 +975,28 @@ $MissingPoliciesHTML = ""
 
     # Check each policy variable and add corresponding warning messages
     if (!$PolicyDeviceCodeFlow) {
-        $Warnings += "No policy targeting the DeviceCode Flow found!"
+        $Warnings += "No policy targeting the Device Code flow found!"
     }
     if (!$PolicyLegacyAuth) {
-        $Warnings += "No policy targeting legacy Authentication found!"
+        $Warnings += "No policy targeting legacy authentication found!"
     }
     if (!$PolicyRiskySignIn) {
-        $Warnings += "No policy targeting risky sign-ins!"
+        $Warnings += "No policy targeting risky sign-ins found!"
     }
     if (!$PolicyUserRisk) {
-        $Warnings += "No policy targeting user risk!"
+        $Warnings += "No policy targeting user risk found!"
     }
     if (!$PolicyRegSecInfo) {
-        $Warnings += "No policy limiting the registrations of security information!"
+        $Warnings += "No policy limiting the registrations of security information found!"
     }
     if (!$PolicyRegDevices) {
-        $Warnings += "No policy limiting joining or registering devices!"
+        $Warnings += "No policy limiting joining or registering devices found!"
     }
     if (!$PolicyMfaUser) {
-        $Warnings += "No policy enforcing MFA!"
+        $Warnings += "No policy enforcing MFA found!"
     }
     if (!$PolicyAuthStrength) {
-        $Warnings += "No policy enforcing Authentication Strength (Phishing resistant MFA for admins)!"
+        $Warnings += "No policy enforcing Authentication Strength (e.g., phishing-resistant MFA) for admins found!"
     }
     
     if ($Warnings.count -ge 1) {
