@@ -688,6 +688,8 @@ function Invoke-CheckEnterpriseApps {
         #Process Last sign-in date for each App
         if ($AppLastSignIns.ContainsKey($item.AppId)) {
             $AppsignInData = $AppLastSignIns[$item.AppId]
+        } else {
+            $AppsignInData = $Null
         }
 
     ########################################## SECTION: RISK RATING AND WARNINGS ##########################################        
@@ -973,14 +975,10 @@ function Invoke-CheckEnterpriseApps {
         }
 
         #Check if app is inactive
-        if ($AppsignInData.lastSignInDays -ge 180 -or $AppsignInData.lastSignInDays -eq "-") {
+        if ($AppsignInData.lastSignInDays -ge 180 -or $AppsignInData.lastSignInDays -eq "-" -or $Null -eq $AppsignInData) {
             $Inactive = $true
         } else {
-            if ($AppsignInData) {
-                $Inactive = $false
-            } else {
-                $Inactive = "?"
-            }
+            $Inactive = $false
         }
 
         #Process Delegated API permission. Only increase the score once (independet of how many principal or how many of each category are assigned)
