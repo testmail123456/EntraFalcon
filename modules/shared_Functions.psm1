@@ -895,26 +895,35 @@ $global:GLOBALJavaScript = @'
         function sortData() {
             const { column, asc } = currentSort;
             if (!column) return;
+
             function extractText(val) {
-            if (typeof val === "string") {
-                // Extract text inside anchor if present
-                const match = val.match(/<a[^>]*>(.*?)<\/a>/i);
-                return match ? match[1] : val;
-            }
-            return val ?? '';
+                if (typeof val === "string") {
+                    // Extract text inside anchor if present
+                    const match = val.match(/<a[^>]*>(.*?)<\/a>/i);
+                    return match ? match[1] : val;
+                }
+                return val ?? '';
             }
 
             filteredData.sort((a, b) => {
-            const valA = extractText(a[column]);
-            const valB = extractText(b[column]);
+                const valA = extractText(a[column]);
+                const valB = extractText(b[column]);
 
-            if (valA === valB) return 0;
-            return asc
-                ? valA > valB ? 1 : -1
-                : valA < valB ? 1 : -1;
+                const numA = parseFloat(valA);
+                const numB = parseFloat(valB);
+                const isNumA = !isNaN(numA);
+                const isNumB = !isNaN(numB);
+
+                let result;
+                if (isNumA && isNumB) {
+                    result = numA - numB;
+                } else {
+                    result = String(valA).localeCompare(String(valB), undefined, { numeric: true, sensitivity: 'base' });
+                }
+
+                return asc ? result : -result;
             });
         }
-        
         function parseOperatorFilter(input, rawValue) {
             // Extract visible text only (e.g., from anchor tags)
             function extractText(html) {
@@ -3544,11 +3553,14 @@ function Write-LogVerbose {
         [System.Management.Automation.PSCmdlet]$CallerPSCmdlet
     )
 
-    if ($CallerPSCmdlet.MyInvocation.BoundParameters["Verbose"]) {
+    if ($CallerPSCmdlet -and $CallerPSCmdlet.MyInvocation.BoundParameters["Verbose"]) {
         $timestamp = Get-Date -Format "HH:mm:ss"
         $CallerPSCmdlet.WriteVerbose("[$timestamp] $Message")
+    } elseif (-not $CallerPSCmdlet) { #Edge case for manual execution
+        Write-Verbose "[$(Get-Date -Format 'HH:mm:ss')] $Message"
     }
 }
+
 function Show-EntraFalconBanner {
     [CmdletBinding()]
     Param (
