@@ -76,7 +76,7 @@ if ($ManualCode.IsPresent) {
 }
 
 #Constants
-$EntraFalconVersion = "V20250506"
+$EntraFalconVersion = "V20250508"
 
 #Define additional authentication parameters
 $Global:GLOBALAuthParameters = @{}
