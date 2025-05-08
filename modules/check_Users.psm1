@@ -169,6 +169,15 @@ function Invoke-CheckUsers {
         }
     }
 
+    # Count transitive memberships
+    $TotalTransitiveMemberRelations = 0
+    foreach ($members in $UserMemberOfRaw.Values) {
+        $TotalTransitiveMemberRelations += $members.Count
+    }
+
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Got transitive member relationships: $TotalTransitiveMemberRelations"
+    
+
     #Check token validity to ensure it will not expire in the next 30 minutes
     if (-not (Invoke-CheckTokenExpiration $GLOBALmsGraphAccessToken)) { RefreshAuthenticationMsGraph | Out-Null}
 
@@ -310,8 +319,11 @@ function Invoke-CheckUsers {
                             }
                         )
                     }
+                    '#microsoft.graph.directoryRole' {
+                        #Ignore, already handeled in a different way
+                    }
                     default {
-                        Write-Verbose "Unknown member type: $($member.'@odata.type') for user $($user.Id)"
+                        Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Unknown member type: $($member.'@odata.type') for user $($user.Id)"
                     }
                 }
             }
@@ -352,7 +364,7 @@ function Invoke-CheckUsers {
                     }
         
                     default {
-                        Write-Verbose "Unknown owned object type: $($OwnedObject.'@odata.type') for user $($user.Id)"
+                        Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Unknown owned object type: $($OwnedObject.'@odata.type') for user $($user.Id)"
                     }
                 }
             }
