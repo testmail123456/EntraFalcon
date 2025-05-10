@@ -310,7 +310,8 @@ function ConvertTo-Yaml {
     $HighTierAssignments = @()
     foreach ($assignmentList in $TenantRoleAssignments.Values) {
         foreach ($assignment in $assignmentList) {
-            if ($assignment.RoleTier -in 0, 1) {
+            #Taking only Tier 0 and Tier 1 roles and hide the Directory Synchronization Accounts role
+            if ($assignment.RoleTier -in 0, 1 -and $assignment.RoleDefinitionId -ne "d29b2b05-8046-44ba-8758-1e26182fcf32") {
                 $HighTierAssignments += $assignment
             }
         }
