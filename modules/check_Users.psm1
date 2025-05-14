@@ -29,6 +29,7 @@ function Invoke-CheckUsers {
         [Parameter(Mandatory=$true)][hashtable]$TenantRoleAssignments,
         [Parameter(Mandatory=$true)][String[]]$StartTimestamp,
         [Parameter(Mandatory=$true)][hashtable]$AllGroupsDetails,
+        [Parameter(Mandatory=$true)][hashtable]$Devices,
         [Parameter(Mandatory=$true)][hashtable]$EnterpriseApps,
         [Parameter(Mandatory=$false)][hashtable]$UserAuthMethodsTable,
         [Parameter(Mandatory=$true)][hashtable]$AppRegistrations,
@@ -40,6 +41,9 @@ function Invoke-CheckUsers {
 
 
     ############################## Script section ########################
+
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Start user script"
+
     #Check token validity to ensure it will not expire in the next 30 minutes
     if (-not (Invoke-CheckTokenExpiration $GLOBALmsGraphAccessToken)) { RefreshAuthenticationMsGraph | Out-Null}
 
@@ -137,11 +141,11 @@ function Invoke-CheckUsers {
     write-host "[*] Get all users"
     if ($PermissionUserSignInActivity) {
         $QueryParameters = @{
-            '$select' = "Id,DisplayName,UserPrincipalName,AccountEnabled,UserType,BusinessPhones,AssignedLicenses,OtherMails,OnPremisesSyncEnabled,OnPremisesExtensionAttributes,Authentication,AuthorizationInfo,SignInActivity,CreatedDateTime,JobTitle,Department"
+            '$select' = "Id,DisplayName,UserPrincipalName,AccountEnabled,UserType,AssignedLicenses,OtherMails,OnPremisesSyncEnabled,OnPremisesExtensionAttributes,Authentication,AuthorizationInfo,SignInActivity,CreatedDateTime,JobTitle,Department"
         }
     } else {
         $QueryParameters = @{
-            '$select' = "Id,DisplayName,UserPrincipalName,AccountEnabled,UserType,BusinessPhones,AssignedLicenses,OtherMails,OnPremisesSyncEnabled,OnPremisesExtensionAttributes,Authentication,AuthorizationInfo,CreatedDateTime,JobTitle,Department"
+            '$select' = "Id,DisplayName,UserPrincipalName,AccountEnabled,UserType,AssignedLicenses,OtherMails,OnPremisesSyncEnabled,OnPremisesExtensionAttributes,Authentication,AuthorizationInfo,CreatedDateTime,JobTitle,Department"
         } 
     }
     $AllUsers = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/users" -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)
@@ -176,7 +180,7 @@ function Invoke-CheckUsers {
     }
 
     Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Got transitive member relationships: $TotalTransitiveMemberRelations"
-    
+
 
     #Check token validity to ensure it will not expire in the next 30 minutes
     if (-not (Invoke-CheckTokenExpiration $GLOBALmsGraphAccessToken)) { RefreshAuthenticationMsGraph | Out-Null}
@@ -376,10 +380,7 @@ function Invoke-CheckUsers {
             foreach ($Device in $DeviceOwnerRaw[$item.Id]) {
                 [void]$DeviceOwner.Add(
                     [PSCustomObject]@{
-                        displayName = $Device.displayName
-                        operatingSystem     = $Device.operatingSystem
-                        approximateLastSignInDateTime = $Device.approximateLastSignInDateTime
-                        accountEnabled = $Device.accountEnabled
+                        id = $Device.id
                     }
                 )
             }
@@ -391,10 +392,7 @@ function Invoke-CheckUsers {
             foreach ($Device in $DeviceRegisteredRaw[$item.Id]) {
                 [void]$DeviceRegistered.Add(
                     [PSCustomObject]@{
-                        displayName = $Device.displayName
-                        operatingSystem     = $Device.operatingSystem
-                        approximateLastSignInDateTime = $Device.approximateLastSignInDateTime
-                        accountEnabled = $Device.accountEnabled
+                        id = $Device.id
                     }
                 )
             }
@@ -871,7 +869,6 @@ function Invoke-CheckUsers {
             Licenses = $($item.AssignedLicenses).count
             LicenseStatus = $LicenseStatus
             OnPrem = $OnPrem
-            BusinessPhones = $item.BusinessPhones
             Department = $item.Department
             JobTitle = $item.JobTitle
             OtherMails = $item.OtherMails
@@ -1125,12 +1122,14 @@ function Invoke-CheckUsers {
 
 
         if (@($item.DeviceOwnerDetails).count -ge 1) {
-            $ReportingOwnerDevice = foreach ($device in $($item.DeviceOwnerDetails)) {
+            $ReportingOwnerDevice = foreach ($object in $($item.DeviceOwnerDetails)) {
+                $DeviceDetails = $Devices[$object.id]
                 [pscustomobject]@{ 
-                    "Device name" = $($device.displayName)
-                    "Enabled" = $($device.accountEnabled)
-                    "OS" = $($device.operatingSystem)
-                    "Last sign-in" = $($device.approximateLastSignInDateTime)
+                    "Displayname" = $($DeviceDetails.displayName)
+                    "Enabled" = $($DeviceDetails.accountEnabled)
+                    "Type" = $($DeviceDetails.trustType)
+                    "Manufacturer" = $($DeviceDetails.Manufacturer)
+                    "OS" = "$($DeviceDetails.operatingSystem) / $($DeviceDetails.operatingSystemVersion)"
                 }
             }
             [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
@@ -1151,12 +1150,14 @@ function Invoke-CheckUsers {
 
         #Registered devices
         if (@($item.DeviceRegisteredDetails).count -ge 1) {
-            $ReportingRegisteredDevice = foreach ($device in $($item.DeviceRegisteredDetails)) {
+            $ReportingRegisteredDevice = foreach ($object in $($item.DeviceRegisteredDetails)) {
+                $DeviceDetails = $Devices[$object.id]
                 [pscustomobject]@{ 
-                    "Device name" = $($device.displayName)
-                    "Enabled" = $($device.accountEnabled)
-                    "OS" = $($device.operatingSystem)
-                    "Last sign-in" = $($device.approximateLastSignInDateTime)
+                    "Displayname" = $($DeviceDetails.displayName)
+                    "Enabled" = $($DeviceDetails.accountEnabled)
+                    "Type" = $($DeviceDetails.trustType)
+                    "Manufacturer" = $($DeviceDetails.Manufacturer)
+                    "OS" = "$($DeviceDetails.operatingSystem) / $($DeviceDetails.operatingSystemVersion)"
                 }
             }
             [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
