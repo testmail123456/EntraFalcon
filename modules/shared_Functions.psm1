@@ -2330,6 +2330,25 @@ function Get-RegisterAuthMethodsUsers {
     return $UserAuthMethodsTable
 }
 
+#Get all Devices
+function Get-Devices {
+     write-host "[*] Retrieve devices"
+
+    $QueryParameters = @{
+        '$select' = "Id,accountEnabled,displayName,Manufacturer,trustType,operatingSystem,operatingSystemVersion"
+    }
+
+    $DevicesRaw = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/devices" -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)
+    
+    #Convert to HT
+    $Devices = @{}
+    foreach ($device in $DevicesRaw) {
+        $Devices[$device.Id] = $device
+    }
+    
+    return $Devices
+}
+
 function AuthCheckAzPSNative {
     $result = $true
     Write-host "[*] Checking access to ARM API"
@@ -3361,7 +3380,7 @@ function Get-PimforGroupsAssignments {
                 }
     
                 # Send Batch request
-                $PIMforGroupsAssignments = (Send-GraphBatchRequest -AccessToken $tokens.access_token -Requests $Requests -beta -UserAgent $($GlobalAuditSummary.UserAgent.Name)).response.value
+                $PIMforGroupsAssignments = (Send-GraphBatchRequest -AccessToken $tokens.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)).response.value
                 Write-Host "[+] Got $($PIMforGroupsAssignments.Count) objects eligible for a PIM-enabled group"
                 
             } else {
@@ -3582,4 +3601,4 @@ function Show-EntraFalconBanner {
     Write-Host ""
 }
 
-Export-ModuleMember -Function Show-EntraFalconBanner,AuthenticationMSGraph,start-CleanUp,Get-OrgInfo,Write-LogVerbose,Invoke-AzureRoleProcessing,Get-RegisterAuthMethodsUsers,Invoke-EntraRoleProcessing,Get-EntraPIMRoleAssignments,AuthCheckMSGraph,RefreshAuthenticationMsGraph,Get-PimforGroupsAssignments,Invoke-CheckTokenExpiration,Invoke-MsGraphAuthPIM,EnsureAuthMsGraph,Get-AzureRoleDetails,Get-AdministrativeUnitsWithMembers,Get-ConditionalAccessPolicies,Get-EntraRoleAssignments,Get-APIPermissionCategory,Get-ObjectInfo,EnsureAuthAzurePsNative,checkSubscriptionNative,Get-AllAzureIAMAssignmentsNative,Get-PIMForGroupsAssignmentsDetails,Show-EnumerationSummary,start-InitTasks
+Export-ModuleMember -Function Show-EntraFalconBanner,AuthenticationMSGraph,Get-Devices,start-CleanUp,Get-OrgInfo,Write-LogVerbose,Invoke-AzureRoleProcessing,Get-RegisterAuthMethodsUsers,Invoke-EntraRoleProcessing,Get-EntraPIMRoleAssignments,AuthCheckMSGraph,RefreshAuthenticationMsGraph,Get-PimforGroupsAssignments,Invoke-CheckTokenExpiration,Invoke-MsGraphAuthPIM,EnsureAuthMsGraph,Get-AzureRoleDetails,Get-AdministrativeUnitsWithMembers,Get-ConditionalAccessPolicies,Get-EntraRoleAssignments,Get-APIPermissionCategory,Get-ObjectInfo,EnsureAuthAzurePsNative,checkSubscriptionNative,Get-AllAzureIAMAssignmentsNative,Get-PIMForGroupsAssignmentsDetails,Show-EnumerationSummary,start-InitTasks
