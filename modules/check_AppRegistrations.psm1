@@ -211,7 +211,7 @@ function Invoke-CheckAppRegistrations {
         }
     }
     # Send Batch request and create a hashtable
-    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -beta -UserAgent $($GlobalAuditSummary.UserAgent.Name))
+    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name))
     $AppOwnersRaw = @{}
     foreach ($item in $RawResponse) {
         if ($item.response.value -and $item.response.value.Count -gt 0) {
