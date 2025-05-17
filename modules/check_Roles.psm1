@@ -31,7 +31,7 @@ function Invoke-CheckRoles {
             if ($MatchingUser) {
                 $object = [PSCustomObject]@{ 
                     DisplayName = $MatchingUser.UPN
-                    DisplayNameLink = "<a href=Users_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($MatchingUser.Id)>$($MatchingUser.UPN)</a>"
+                    DisplayNameLink = "<a href=Users_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($ObjectID)>$($MatchingUser.UPN)</a>"
                     Type = "User"
                 }
                 Return $object
@@ -43,7 +43,7 @@ function Invoke-CheckRoles {
             if ($MatchingGroup) {
                 $object = [PSCustomObject]@{ 
                     DisplayName = $MatchingGroup.DisplayName
-                    DisplayNameLink = "<a href=Groups_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($MatchingGroup.Id)>$($MatchingGroup.DisplayName)</a>"
+                    DisplayNameLink = "<a href=Groups_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($ObjectID)>$($MatchingGroup.DisplayName)</a>"
                     Type = "Group"
                 }
                 Return $object
@@ -55,7 +55,7 @@ function Invoke-CheckRoles {
             if ($MatchingEnterpriseApp) {
                 $object = [PSCustomObject]@{ 
                     DisplayName = $MatchingEnterpriseApp.DisplayName
-                    DisplayNameLink = "<a href=EnterpriseApps_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($MatchingEnterpriseApp.Id)>$($MatchingEnterpriseApp.DisplayName)</a>"
+                    DisplayNameLink = "<a href=EnterpriseApps_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($ObjectID)>$($MatchingEnterpriseApp.DisplayName)</a>"
                     Type = "Enterprise Application"
                 }
                 Return $object
@@ -67,7 +67,7 @@ function Invoke-CheckRoles {
             if ($MatchingManagedIdentity) {
                 $object = [PSCustomObject]@{ 
                     DisplayName = $MatchingManagedIdentity.DisplayName
-                    DisplayNameLink = "<a href=ManagedIdentities_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($MatchingManagedIdentity.Id)>$($MatchingManagedIdentity.DisplayName)</a>"
+                    DisplayNameLink = "<a href=ManagedIdentities_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($ObjectID)>$($MatchingManagedIdentity.DisplayName)</a>"
                     Type = "Managed Identity"
                 }
                 Return $object
@@ -79,7 +79,7 @@ function Invoke-CheckRoles {
             if ($MatchingAppRegistration) {
                 $object = [PSCustomObject]@{ 
                     DisplayName = $MatchingAppRegistration.DisplayName
-                    DisplayNameLink = "<a href=AppRegistration_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($MatchingAppRegistration.Id)>$($MatchingAppRegistration.DisplayName)</a>"
+                    DisplayNameLink = "<a href=AppRegistration_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($ObjectID)>$($MatchingAppRegistration.DisplayName)</a>"
                     Type = "App Registration"
                 }
                 Return $object
