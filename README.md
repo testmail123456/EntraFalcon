@@ -98,12 +98,14 @@ This skips the additional authentication needed to access PIM for Groups data.
 ```
 
 **Other Optional Parameters:**
-| Parameter              | Description                                                                 | Default Value                                     |
-|----------------------  |-----------------------------------------------------------------------------|---------------------------------------------------|
-| **UserAgent**          | User agent used for the requests to the token endpoint and API calls.       | `EntraFalcon`                                     |  
-| **DisableCAE**         | Disables requesting Continuous Access Evaluation (CAE) tokens.              | `false`                                           |
-| **Tenant**             | Specifies the tenant (ID or domain) to authenticate against. Useful when assessing a tenant other than the account’s home tenant.|`Account's home tenant`|
-| **OutputFolder**       | Output folder where the reports are stored.                                 |`Results_%TenantName%_YYYYMMDD_HHSS`               |
+| Parameter              | Description                                                                                                                      | Default Value                                     |
+|----------------------  |----------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------------|
+| **UserAgent**          | User agent used for the requests to the token endpoint and API calls.                                                            | `EntraFalcon`                                     |  
+| **DisableCAE**         | Disables requesting Continuous Access Evaluation (CAE) tokens.                                                                   | `false`                                           |
+| **Tenant**             | Specifies the tenant (ID or domain) to authenticate against. Useful when assessing a tenant other than the account’s home tenant.|`Account's home tenant`                            |
+| **OutputFolder**       | Output folder where the reports are stored.                                                                                      |`Results_%TenantName%_YYYYMMDD_HHSS`               |
+| **LimitResults**       | Limits the number of groups and users in the report (after sorting by risk). Useful for large tenants.                           | -                                                 |
+| **Verbose**            | Enables detailed output. Useful for troubleshooting and monitoring progress in large tenants.                                    | -                                                 |
 
 
 ## 📊 Example Reports

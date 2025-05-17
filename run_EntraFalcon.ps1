@@ -22,6 +22,10 @@
     Disables Continuous Access Evaluation (CAE), resulting in shorter-lived access tokens.
     Useful when CAE breaks the script.
 
+    .PARAMETER LimitResults
+    Limits the number of groups or users included in the report. 
+    The limit is applied *after* sorting by risk score, ensuring only the highest-risk groups and users are processed and reported. This helps improve performance and keep the reports usable in large environments.
+
     .PARAMETER AuthMethod
     3 different Authentication methods are supported:
     - `AuthCode` (default): Interactive browser login using legacy .NET
@@ -35,13 +39,17 @@
     Includes Microsoft-owned enterprise applications in the enumeration and analysis.  
     By default, these are excluded to reduce noise.
 
+    .PARAMETER Verbose
+    Enables verbose output for troubleshooting and status updates during processing, especially useful in large tenants.
+
+    .PARAMETER QAMode
+    Dumps the AllGroups and AllUsers objects as JSON for QA tests.
+
     .NOTES
     Author: Christian Feuchter, Compass Security Switzerland AG, https://www.compass-security.com/
     Source: https://github.com/CompassSecurity/EntraFalcon 
 
 #>
-
-
 
 [CmdletBinding()]
 Param (
@@ -68,15 +76,23 @@ Param (
     [string]$OutputFolder,
 
     [Parameter(Mandatory = $false)]
+    [int]$LimitResults,
+
+    [Parameter(Mandatory=$false)]
+    [switch]$QAMode = $false,
+
+    [Parameter(Mandatory = $false)]
     [switch]$ManualCode #Alias because of EntraTokenAid error message
 )
+
 # Override AuthMethod if -ManualCode is used
 if ($ManualCode.IsPresent) {
     $AuthMethod = "ManualCode"
 }
 
+
 #Constants
-$EntraFalconVersion = "V20250508"
+$EntraFalconVersion = "V20250518"
 
 #Define additional authentication parameters
 $Global:GLOBALAuthParameters = @{}
@@ -89,9 +105,17 @@ if ($null -ne $Tenant -and "" -ne $Tenant) {
 }
 
 # Optional parameters for the sub-modules
-$optionalParams = @{}
+$optionalParamsET = @{}
 if ($IncludeMsApps) {
-    $optionalParams['IncludeMsApps'] = $true
+    $optionalParamsET['IncludeMsApps'] = $true
+}
+
+$optionalParamsUserandGroup = @{}
+if ($LimitResults) {
+    $optionalParamsUserandGroup['LimitResults'] = $LimitResults
+}
+if ($QAMode) {
+    $optionalParamsUserandGroup['QAMode'] = $QAMode
 }
 
 # Import shared functions
@@ -181,12 +205,15 @@ if ($TenantPimForGroupsAssignments) {
 # Get user's MFA status
 $UserAuthMethodsTable = Get-RegisterAuthMethodsUsers
 
+# Get Devices
+$Devices = Get-Devices
+
 
 write-host "`n********************************** Enumerating Groups **********************************"
-$AllGroupsDetails = Invoke-CheckGroups -AdminUnitWithMembers $AdminUnitWithMembers -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -ConditionalAccessPolicies $Caps -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -TenantPimForGroupsAssignments $TenantPimForGroupsAssignments -OutputFolder $OutputFolder -Verbose:$VerbosePreference
+$AllGroupsDetails = Invoke-CheckGroups -AdminUnitWithMembers $AdminUnitWithMembers -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -ConditionalAccessPolicies $Caps -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -TenantPimForGroupsAssignments $TenantPimForGroupsAssignments -OutputFolder $OutputFolder -Devices $Devices -Verbose:$VerbosePreference @optionalParamsUserandGroup
 
 write-host "`n********************************** Enumerating Enterprise Apps **********************************"
-$EnterpriseApps = Invoke-CheckEnterpriseApps -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -AllGroupsDetails $AllGroupsDetails -OutputFolder $OutputFolder -Verbose:$VerbosePreference @optionalParams
+$EnterpriseApps = Invoke-CheckEnterpriseApps -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -AllGroupsDetails $AllGroupsDetails -OutputFolder $OutputFolder -Verbose:$VerbosePreference @optionalParamsET
 
 write-host "`n********************************** Enumerating Managed Identities **********************************"
 $ManagedIdentities = Invoke-CheckManagedIdentities -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -AllGroupsDetails $AllGroupsDetails -OutputFolder $OutputFolder -Verbose:$VerbosePreference
@@ -195,7 +222,7 @@ write-host "`n********************************** Enumerating App Registrations *
 $AppRegistrations = Invoke-CheckAppRegistrations -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -EnterpriseApps $EnterpriseApps -AllGroupsDetails $AllGroupsDetails -TenantRoleAssignments $TenantRoleAssignments -OutputFolder $OutputFolder -Verbose:$VerbosePreference
 
 write-host "`n********************************** Enumerating Users **********************************"
-$Users = Invoke-CheckUsers -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -EnterpriseApps $EnterpriseApps -AllGroupsDetails $AllGroupsDetails -ConditionalAccessPolicies $Caps -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -AppRegistrations $AppRegistrations -AdminUnitWithMembers $AdminUnitWithMembers -TenantPimForGroupsAssignments $TenantPimForGroupsAssignments -UserAuthMethodsTable $UserAuthMethodsTable -OutputFolder $OutputFolder -Verbose:$VerbosePreference
+$Users = Invoke-CheckUsers -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -EnterpriseApps $EnterpriseApps -AllGroupsDetails $AllGroupsDetails -ConditionalAccessPolicies $Caps -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -AppRegistrations $AppRegistrations -AdminUnitWithMembers $AdminUnitWithMembers -TenantPimForGroupsAssignments $TenantPimForGroupsAssignments -UserAuthMethodsTable $UserAuthMethodsTable -Devices $Devices -OutputFolder $OutputFolder -Verbose:$VerbosePreference @optionalParamsUserandGroup
 
 write-host "`n********************************** Generating Role Assignments **********************************"
 Invoke-CheckRoles -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -EnterpriseApps $EnterpriseApps -AllGroupsDetails $AllGroupsDetails -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -AppRegistrations $AppRegistrations -AdminUnitWithMembers $AdminUnitWithMembers -Users $Users -ManagedIdentities $ManagedIdentities -OutputFolder $OutputFolder -Verbose:$VerbosePreference
