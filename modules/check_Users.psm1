@@ -2,19 +2,6 @@
 	.SYNOPSIS
 	   Enumerates and analyzes all users in the current tenant, including access, ownerships, roles, and risk posture.
 
-	.DESCRIPTION
-		This script will enumerate all users including:
-		 - User Type
-		 - Status
-		 - Onprem
-		 - Groups assigned
-		 - Owner of Groups
-		 - AuUnits
-		 - Roles (only active assignments)
-		 - Application / SP ownership
-		 - Device Owner / Registered devices
-		 - Last sign-in
-
 #>
 function Invoke-CheckUsers {
     ############################## Parameter section ########################
@@ -23,8 +10,10 @@ function Invoke-CheckUsers {
         [Parameter(Mandatory=$false)][string]$OutputFolder = ".",
         [Parameter(Mandatory=$false)][switch]$SkipAutoRefresh = $false,
         [Parameter(Mandatory=$false)][Object[]]$AdminUnitWithMembers,
+        [Parameter(Mandatory=$false)][int]$LimitResults,
         [Parameter(Mandatory=$true)][Object[]]$CurrentTenant,
         [Parameter(Mandatory=$false)][Object[]]$ConditionalAccessPolicies,
+        [Parameter(Mandatory=$false)][switch]$QAMode = $false,
         [Parameter(Mandatory=$false)][hashtable]$AzureIAMAssignments,
         [Parameter(Mandatory=$true)][hashtable]$TenantRoleAssignments,
         [Parameter(Mandatory=$true)][String[]]$StartTimestamp,
@@ -35,7 +24,6 @@ function Invoke-CheckUsers {
         [Parameter(Mandatory=$true)][hashtable]$AppRegistrations,
         [Parameter(Mandatory=$false)][Object[]]$TenantPimForGroupsAssignments
     )
-
 
     ############################## Function section ########################
 
@@ -117,22 +105,52 @@ function Invoke-CheckUsers {
 
     }
 
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Create AU mapping"
+    # Create a hashtable: UserId -> List of Admin Units
+    $UserToAUMap = @{}
+
+    foreach ($au in $AdminUnitWithMembers) {
+        $members = $au.MembersUser
+    
+        if ($members -is [System.Collections.IDictionary]) {
+            $members = @($members)
+        }
+    
+        foreach ($member in $members) {
+            $id = $member.id
+            if ($null -ne $id) {
+                if (-not $UserToAUMap.ContainsKey($id)) {
+                    $UserToAUMap[$id] = [System.Collections.Generic.List[object]]::new()
+                }
+    
+                # Store only required properties
+                $auLite = [pscustomobject]@{
+                    DisplayName                  = $au.DisplayName
+                    IsMemberManagementRestricted = $au.IsMemberManagementRestricted
+                }
+    
+                $UserToAUMap[$id].Add($auLite)
+            }
+        }
+    }
+
     ########################################## SECTION: DATACOLLECTION ##########################################
 
 
     # Checking if users SignInActivity property can be retrieved. Requires Premium otherwise HTTP 403:Tenant is not a B2C tenant and doesn't have premium license
     $QueryParameters = @{
-        '$select' = "SignInActivity"
+        '$select' = "id,SignInActivity"
+        '$top' = "1"
     }
     try {
-        Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/users" -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -ErrorAction Stop | out-null
+        Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/users" -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -ErrorAction Stop -DisablePagination | Out-Null
     } catch {
         if ($($_.Exception.Message) -match "Status: 403") {
             write-host "[!] HTTP 403 Error: Most likely due to missing Entra ID premium licence. Can't retrieve SignInActivity."
         } else {
             write-host "[!] Auth error: $($_.Exception.Message -split '\n'). Can't retrieve SignInActivity."
         }
-        $WarningReport = "No permissions to retrieve users SignInActivity properties. Inactive users are not marked."
+        $WarningReport += "No permissions to retrieve users SignInActivity properties. Inactive users are not marked."
         $PermissionUserSignInActivity = $false
     }
 
@@ -141,11 +159,11 @@ function Invoke-CheckUsers {
     write-host "[*] Get all users"
     if ($PermissionUserSignInActivity) {
         $QueryParameters = @{
-            '$select' = "Id,DisplayName,UserPrincipalName,AccountEnabled,UserType,AssignedLicenses,OtherMails,OnPremisesSyncEnabled,OnPremisesExtensionAttributes,Authentication,AuthorizationInfo,SignInActivity,CreatedDateTime,JobTitle,Department"
+            '$select' = "Id,DisplayName,UserPrincipalName,AccountEnabled,UserType,AssignedLicenses,OtherMails,OnPremisesSyncEnabled,SignInActivity,CreatedDateTime,JobTitle,Department"
         }
     } else {
         $QueryParameters = @{
-            '$select' = "Id,DisplayName,UserPrincipalName,AccountEnabled,UserType,AssignedLicenses,OtherMails,OnPremisesSyncEnabled,OnPremisesExtensionAttributes,Authentication,AuthorizationInfo,CreatedDateTime,JobTitle,Department"
+            '$select' = "Id,DisplayName,UserPrincipalName,AccountEnabled,UserType,AssignedLicenses,OtherMails,OnPremisesSyncEnabled,CreatedDateTime,JobTitle,Department"
         } 
     }
     $AllUsers = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/users" -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)
@@ -153,25 +171,51 @@ function Invoke-CheckUsers {
     $UsersTotalCount = @($AllUsers).count
     write-host "[+] Got $($UsersTotalCount) users"
 
-
+    # Get all transitve memberships (expensive!)
     Write-Host "[*] Get all users memberships"
-    #Get all users memberships  for later lookup
-    $Requests = @()
-    $AllUsers | ForEach-Object {
-        $Requests += @{
-            "id"     = $($_.id)
-            "method" = "GET"
-            "url"    = "/users/$($_.id)/transitiveMemberOf"
-        }
-    }
-    # Send Batch request and create a hashtable
-    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -beta -UserAgent $($GlobalAuditSummary.UserAgent.Name))
+
     $UserMemberOfRaw = @{}
-    foreach ($item in $RawResponse) {
-        if ($item.response.value -and $item.response.value.Count -gt 0) {
-            $UserMemberOfRaw[$item.id] = $item.response.value
+    $BatchSize = 10000     
+    $ChunkCount = [math]::Ceiling($AllUsers.Count / $BatchSize)
+
+    for ($chunkIndex = 0; $chunkIndex -lt $ChunkCount; $chunkIndex++) {
+        Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Processing user batch $($chunkIndex + 1) of $ChunkCount..."
+
+        $StartIndex = $chunkIndex * $BatchSize
+        $EndIndex = [math]::Min($StartIndex + $BatchSize - 1, $AllUsers.Count - 1)
+        $UserBatch = $AllUsers[$StartIndex..$EndIndex]
+
+        $Requests = New-Object System.Collections.Generic.List[Hashtable]
+        foreach ($user in $UserBatch) {
+            $req = @{
+                "id"     = $user.id
+                "method" = "GET"
+                "url"    = "/users/$($user.id)/transitiveMemberOf"
+            }
+            $Requests.Add($req)
+        }
+
+        # Send batched request
+        $Response = Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id'}
+
+        # Parse and store results
+        foreach ($item in $Response) {
+            if ($item.response.value -and $item.response.value.Count -gt 0) {
+                $groupIds = @()
+
+                foreach ($entry in $item.response.value) {
+                    if ($entry.'@odata.type' -eq '#microsoft.graph.group') {
+                        $groupIds += $entry.id
+                    }
+                }
+
+                if ($groupIds.Count -gt 0) {
+                    $UserMemberOfRaw[$item.id] = $groupIds
+                }
+            }
         }
     }
+    
 
     # Count transitive memberships
     $TotalTransitiveMemberRelations = 0
@@ -180,6 +224,12 @@ function Invoke-CheckUsers {
     }
 
     Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Got transitive member relationships: $TotalTransitiveMemberRelations"
+    #Show warning in large tenants
+    if (-not $LimitResults) {
+        if ($TotalTransitiveMemberRelations -ge 1500000 -or $UsersTotalCount -ge 100000) {
+            Write-Warning "In large tenants, consider using -LimitResults (e.g., 30000) to reduce report size and improve performance."
+        }
+    }
 
 
     #Check token validity to ensure it will not expire in the next 30 minutes
@@ -187,16 +237,17 @@ function Invoke-CheckUsers {
 
     Write-Host "[*] Get all users ownerships"
     #Get all users ownerships for later lookup
-    $Requests = @()
-    $AllUsers | ForEach-Object {
-        $Requests += @{
-            "id"     = $($_.id)
+    $Requests = New-Object System.Collections.Generic.List[Hashtable]
+    foreach ($item in $AllUsers) {
+        $req = @{
+            "id"     = $item.id
             "method" = "GET"
-            "url"    = "/users/$($_.id)/ownedObjects"
+            "url"    = "/users/$($item.id)/ownedObjects"
         }
+        $Requests.Add($req)
     }
     # Send Batch request and create a hashtable
-    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -beta -UserAgent $($GlobalAuditSummary.UserAgent.Name))
+    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id'})
     $UserOwnedObjectsRaw = @{}
     foreach ($item in $RawResponse) {
         if ($item.response.value -and $item.response.value.Count -gt 0) {
@@ -209,16 +260,18 @@ function Invoke-CheckUsers {
 
     Write-Host "[*] Get all users device ownerships"
     #Get all users device ownerships for later lookup
-    $Requests = @()
-    $AllUsers | ForEach-Object {
-        $Requests += @{
-            "id"     = $($_.id)
+    $Requests = New-Object System.Collections.Generic.List[Hashtable]
+    foreach ($item in $AllUsers) {
+        $req = @{
+            "id"     = $item.id
             "method" = "GET"
-            "url"    = "/users/$($_.id)/ownedDevices"
+            "url"    = "/users/$($item.id)/ownedDevices"
+            "headers" = @{"Accept"= "application/json;odata.metadata=none"} 
         }
+        $Requests.Add($req)
     }
     # Send Batch request and create a hashtable
-    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -beta -UserAgent $($GlobalAuditSummary.UserAgent.Name))
+    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id'})
     $DeviceOwnerRaw = @{}
     foreach ($item in $RawResponse) {
         if ($item.response.value -and $item.response.value.Count -gt 0) {
@@ -231,16 +284,18 @@ function Invoke-CheckUsers {
 
     Write-Host "[*] Get all users device registrations"
     #Get all users device registrations for later lookup
-    $Requests = @()
-    $AllUsers | ForEach-Object {
-        $Requests += @{
-            "id"     = $($_.id)
+    $Requests = New-Object System.Collections.Generic.List[Hashtable]
+    foreach ($item in $AllUsers) {
+        $req = @{
+            "id"     = $item.id
             "method" = "GET"
-            "url"    = "/users/$($_.id)/registeredDevices"
+            "url"    = "/users/$($item.id)/registeredDevices"
+            "headers" = @{"Accept"= "application/json;odata.metadata=none"} 
         }
+        $Requests.Add($req)
     }
     # Send Batch request and create a hashtable
-    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -beta -UserAgent $($GlobalAuditSummary.UserAgent.Name))
+    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id'})
     $DeviceRegisteredRaw = @{}
     foreach ($item in $RawResponse) {
         if ($item.response.value -and $item.response.value.Count -gt 0) {
@@ -258,7 +313,7 @@ function Invoke-CheckUsers {
     foreach ($item in $AllUsers) {
 
         # Clean vars
-        $Warnings = @()
+        $Warnings = [System.Collections.Generic.HashSet[string]]::new()
         $Protected = $false
         $ProgressCounter ++
         $Impact = $UserImpact["Base"]
@@ -299,45 +354,29 @@ function Invoke-CheckUsers {
         }
 
 
-        #Get users memberships (ignoring directory roles)
-        $UserMemberGroups   = [System.Collections.ArrayList]::new()
-		$AUMember   	    = [System.Collections.ArrayList]::new()
+        #Process users memberships
+        $UserMemberGroups = [System.Collections.Generic.List[object]]::new()
         if ($UserMemberOfRaw.ContainsKey($item.Id)) {
-            foreach ($member in $UserMemberOfRaw[$item.Id]) {
-                switch ($member.'@odata.type') {
-        
-                    '#microsoft.graph.group' {
-                        [void]$UserMemberGroups.Add(
-                            [PSCustomObject]@{
-                                Id             = $member.Id
-                                AssignmentType = 'Active'
-                            }
-                        )
+            foreach ($groupId in $UserMemberOfRaw[$item.Id]) {
+                [void]$UserMemberGroups.Add(
+                    [PSCustomObject]@{
+                        Id             = $groupId
+                        AssignmentType = 'Active'
                     }
-                    '#microsoft.graph.administrativeUnit' {
-                        [void]$AUMember.Add(
-                            [PSCustomObject]@{
-                                Id                           = $member.Id
-                                displayName                  = $member.displayName
-                                isMemberManagementRestricted = $member.isMemberManagementRestricted
-                            }
-                        )
-                    }
-                    '#microsoft.graph.directoryRole' {
-                        #Ignore, already handeled in a different way
-                    }
-                    default {
-                        Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Unknown member type: $($member.'@odata.type') for user $($user.Id)"
-                    }
-                }
+                )
             }
         }
 
+        #Check AU assignment
+        $AUMember = [System.Collections.Generic.List[object]]::new()
+        if ($UserToAUMap.ContainsKey($item.Id)) {
+            $AUMember = $UserToAUMap[$item.Id]
+        }
 
         #Get users owned objects (do not contain devices)
-        $UserOwnedSP        = [System.Collections.ArrayList]::new()
-		$UserOwnedAppRegs   = [System.Collections.ArrayList]::new()
-        $UserOwnedGroups  	= [System.Collections.ArrayList]::new()
+        $UserOwnedSP        = [System.Collections.Generic.List[object]]::new()
+		$UserOwnedAppRegs   = [System.Collections.Generic.List[object]]::new()
+        $UserOwnedGroups  	= [System.Collections.Generic.List[object]]::new()
         if ($UserOwnedObjectsRaw.ContainsKey($item.Id)) {
             foreach ($OwnedObject in $UserOwnedObjectsRaw[$item.Id]) {
                 switch ($OwnedObject.'@odata.type') {
@@ -375,7 +414,7 @@ function Invoke-CheckUsers {
         }
 
         #Get users owned devices
-        $DeviceOwner = [System.Collections.ArrayList]::new()
+        $DeviceOwner = [System.Collections.Generic.List[object]]::new()
         if ($DeviceOwnerRaw.ContainsKey($item.Id)) {
             foreach ($Device in $DeviceOwnerRaw[$item.Id]) {
                 [void]$DeviceOwner.Add(
@@ -387,7 +426,7 @@ function Invoke-CheckUsers {
         } 
 
         #Get users registered devices
-        $DeviceRegistered = [System.Collections.ArrayList]::new()
+        $DeviceRegistered = [System.Collections.Generic.List[object]]::new()
         if ($DeviceRegisteredRaw.ContainsKey($item.Id)) {
             foreach ($Device in $DeviceRegisteredRaw[$item.Id]) {
                 [void]$DeviceRegistered.Add(
@@ -406,13 +445,13 @@ function Invoke-CheckUsers {
                 # Ensure $memberGroups contains values before merging
                 if ($memberGroups -and @($memberGroups).Count -gt 0) {
                     # Rebuild $UserMemberGroups as an array of objects with the new IDs
-                    $UserMemberGroups = $UserMemberGroups + $memberGroups
+                    [void]$UserMemberGroups.AddRange(@($memberGroups))
                 }
 
                 # Ensure $ownerGroups contains values before merging
                 if ($ownerGroups -and @($ownerGroups).Count -gt 0) {
                     # Rebuild $UserOwnedGroups as an array of objects with the new IDs
-                    $UserOwnedGroups = $UserOwnedGroups + $ownerGroups
+                    [void]$UserOwnedGroups.AddRange(@($ownerGroups))
 
                 }
             }
@@ -465,26 +504,20 @@ function Invoke-CheckUsers {
         }
 
         #Get details for each Group
-        $GroupOwnerDetails = foreach ($object in $UserOwnedGroups) {
+        $GroupOwnerDetails = [System.Collections.Generic.List[psobject]]::new()
+        foreach ($object in $UserOwnedGroups) {
             $MatchingGroup = $AllGroupsDetails[$($Object.id)]
-            if (@($MatchingGroup).count -ge 1) {
-                [PSCustomObject]@{ 
-                    Id = $MatchingGroup.Id
-                    DisplayName = $MatchingGroup.DisplayName
-                    Type = $MatchingGroup.Type
-                    Public = $MatchingGroup.Visibility
+            if ($MatchingGroup) {
+                [void]$GroupOwnerDetails.Add([PSCustomObject]@{ 
+                    Id = $object.Id
+                    AssignmentType = $object.AssignmentType
                     RoleAssignable = $MatchingGroup.RoleAssignable
-                    OnPrem = $MatchingGroup.OnPrem
-                    Dynamic = $MatchingGroup.Dynamic
                     EntraRoles = $MatchingGroup.EntraRoles
                     CAPs = $MatchingGroup.CAPs
                     AzureRoles = $MatchingGroup.AzureRoles
                     AppRoles = $MatchingGroup.AppRoles
-                    Users = $MatchingGroup.Users
                     Impact = $MatchingGroup.Impact
-                    ImpactOrg = $MatchingGroup.ImpactOrg
-                    AssignmentType = $object.AssignmentType
-                }
+                })
             }
         }
 
@@ -492,27 +525,21 @@ function Invoke-CheckUsers {
         $GroupOwnerDetails = $GroupOwnerDetails | Sort-Object -Property Impact -Descending
 
         #Get details for each Group
-        $GroupMemberDetails = foreach ($object in $UserMemberGroups) {
+        $GroupMemberDetails    = [System.Collections.Generic.List[psobject]]::new()
+        foreach ($object in $UserMemberGroups) {
             $MatchingGroup = $AllGroupsDetails[$($Object.id)]
-            if (@($MatchingGroup).count -ge 1) {
-                [PSCustomObject]@{ 
-                    Id = $MatchingGroup.Id
-                    DisplayName = $MatchingGroup.DisplayName
-                    Type = $MatchingGroup.Type
-                    Public = $MatchingGroup.Visibility
+
+            if ($MatchingGroup) {
+                [void]$GroupMemberDetails.Add([PSCustomObject]@{ 
+                    Id = $object.Id
+                    AssignmentType = $object.AssignmentType
                     RoleAssignable = $MatchingGroup.RoleAssignable
-                    OnPrem = $MatchingGroup.OnPrem
-                    Dynamic = $MatchingGroup.Dynamic
                     EntraRoles = $MatchingGroup.EntraRoles
                     CAPs = $MatchingGroup.CAPs
                     AzureRoles = $MatchingGroup.AzureRoles
                     AppRoles = $MatchingGroup.AppRoles
-                    Users = $MatchingGroup.Users
                     Impact = $MatchingGroup.Impact
-                    ImpactOrg = $MatchingGroup.ImpactOrg
-                    AssignmentType = $object.AssignmentType
-                    Warnings = $MatchingGroup.Warnings
-                }
+                })
             }
         } 
         #Sort by impact
@@ -580,7 +607,7 @@ function Invoke-CheckUsers {
                     $AddImpact += $object.Impact
                 }
             }
-            $Warnings += "User is owner of $SpCount SP (AppLock:$SpCountAppLock/$SpCount, Unknown:$SpCountAppLockUnknown)"
+            [void]$Warnings.Add("User is owner of $SpCount SP (AppLock:$SpCountAppLock/$SpCount, Unknown:$SpCountAppLockUnknown)")
             $Impact += $AddImpact
         }
 
@@ -594,7 +621,7 @@ function Invoke-CheckUsers {
                 $AddImpact += $object.Impact
             }
             $Impact += $AddImpact
-            $Warnings += "User is owner of $AppRegCount App Registrations"
+            [void]$Warnings.Add("User is owner of $AppRegCount App Registrations")
         }
 
 
@@ -644,7 +671,7 @@ function Invoke-CheckUsers {
                     $MessageParts += "CAPs:$CAPs"
                 }
                 $Message = $MessageParts -join ' / '
-                $Warnings += "Owns privileged group ($Message)"
+                [void]$Warnings.Add("Owns privileged group ($Message)")
             }
             $EntraRolesTroughGroupOwnership = $EntraRolesCount
             $AzureRolesTroughGroupOwnership = $AzureRolesCount
@@ -695,7 +722,7 @@ function Invoke-CheckUsers {
                     $MessageParts += "AzureRoles:$AzureRolesCount"
                 }
                 $Message = $MessageParts -join ' / '
-                $Warnings += "Member of privileged group ($Message)"
+                [void]$Warnings.Add("Member of privileged group ($Message)")
             }
             $EntraRolesTroughGroupMembership = $EntraRolesCount
             $AzureRolesTroughGroupMembership = $AzureRolesCount
@@ -716,14 +743,12 @@ function Invoke-CheckUsers {
                 #Mark cloud sync account to skip inactivity check
                 $CloudSyncAccount = $true
             }
-            $Warnings += "Entra $SyncAccType account"
+            [void]$Warnings.Add("Entra $SyncAccType account")
         } else {
             $SyncAcc = $false
             $CloudSyncAccount = $false
         }
         
-        $OnPremExtensions = $item.OnPremisesExtensionAttributes.PSObject.Properties | Where-Object {$null -ne $_.Value -and $_.Name -ne "AdditionalProperties"} | select-object Name,Value
-
         # Find matching roles in Entra role assignments where the PrincipalId matches the user's Id
         $MatchingEntraRoles = $TenantRoleAssignments[$item.Id]
         foreach ($Role in $MatchingEntraRoles) { 
@@ -750,33 +775,35 @@ function Invoke-CheckUsers {
         #Use function to get the impact score and warning message for assigned Entra roles
         if (($UserEntraRoles | Measure-Object).count -ge 1) {
             $EntraRolesProcessedDetails = Invoke-EntraRoleProcessing -RoleDetails $UserEntraRoles
-            $Warnings += $EntraRolesProcessedDetails.Warning
+            [void]$Warnings.Add($EntraRolesProcessedDetails.Warning)
             $Impact += $EntraRolesProcessedDetails.ImpactScore
 
             #Check if the sync account has more than one role or an unexpected role
             if ($SyncAcc -and (@($UserEntraRoles).count -gt 1 -or $UserEntraRoles.DisplayName -notcontains "Directory Synchronization Accounts")) {
-                $Warnings += "Sync account with extensive privileges"
+                [void]$Warnings.Add("Sync account with extensive privileges")
             }
             #Check if another user has the Directory Sync role
             if (!$SyncAcc -and $UserEntraRoles.DisplayName -contains "Directory Synchronization Accounts") {
-                $Warnings += "Directory Synchronization Role on non-sync user!"
+                [void]$Warnings.Add("Directory Synchronization Role on non-sync user!")
             }
         }
        
-        #Check app roles for sensitive keywords
-        if ($UserDirectAppRolesCount -ge 1){
+        # Check app roles for sensitive keywords
+        if ($UserDirectAppRolesCount -ge 1) {
             $keywords = @("admin", "critical")
             $SensitiveCounter = 0
 
-            $UserDirectAppRoles | ForEach-Object {
-                $matchFound = $false
-                if ($_.AppRoleEnabled -eq $true) {
+            foreach ($appRole in $UserDirectAppRoles) {
+                if ($appRole.AppRoleEnabled -eq $true) {
+                    $matchFound = $false
+
                     foreach ($keyword in $keywords) {
-                        if ($_.AppRoleDisplayName -like "*$keyword*" -or $_.AppRoleDescription -like "*$keyword*") {
+                        if ($appRole.AppRoleDisplayName -like "*$keyword*" -or $appRole.AppRoleDescription -like "*$keyword*") {
                             $matchFound = $true
                             break
                         }
                     }
+
                     if ($matchFound) {
                         $Impact += $UserImpact["DirectAppRoleSensitive"]
                         $SensitiveCounter++
@@ -785,10 +812,12 @@ function Invoke-CheckUsers {
                     }
                 }
             }
+
             if ($SensitiveCounter -ge 1) {
-                $Warnings += "Potentially sensitive AppRole directly assigned"
+                [void]$Warnings.Add("Potentially sensitive AppRole directly assigned")
             }
         }
+
 
 
         #Check last sign-in dates
@@ -834,7 +863,7 @@ function Invoke-CheckUsers {
         if ($AzureRoleCount -ge 1) {
             #Use function to get the impact score and warning message for assigned Azure roles
             $AzureRolesProcessedDetails = Invoke-AzureRoleProcessing -RoleDetails $azureRoleDetails
-            $Warnings += $AzureRolesProcessedDetails.Warning
+            [void]$Warnings.Add($AzureRolesProcessedDetails.Warning)
             $Impact += $AzureRolesProcessedDetails.ImpactScore
         }
 
@@ -883,10 +912,9 @@ function Invoke-CheckUsers {
             Inactive = $Inactive
             AzureRoles = $TotalAzureRoles
             AzureRoleDetails = $AzureRoleDetails
-            OnPremExtensionsDetails = $OnPremExtensions
             GrpMem = @($GroupMemberDetails).count
             GrpOwn = @($GroupOwnerDetails).count
-            AuUnits = @($AUMember).count
+            AuUnits = $AUMember.count
             EntraRoles = $TotalEntraRoles
             AppRegOwn = @($AppRegOwnerDetails).count
             SPOwn = @($SPOwnerDetails).count
@@ -919,12 +947,28 @@ function Invoke-CheckUsers {
 
     #Define output of the main table
     $tableOutput = $AllUsersDetails | Sort-Object Risk -Descending | select-object UPN,UPNlink,Enabled,UserType,OnPrem,Licenses,LicenseStatus,Protected,GrpMem,GrpOwn,AuUnits,EntraRoles,AzureRoles,AppRoles,AppRegOwn,SPOwn,DeviceOwn,DeviceReg,Inactive,LastSignInDays,CreatedDays,MfaCap,Impact,Likelihood,Risk,Warnings
-    $AppendixInactive = $AllUsersDetails | Where-Object {$_.Inactive -eq $true -and $_.Enabled -eq $true}
-    $InactiveUsersCount = @($AppendixInactive).count
+    
+    # Apply result limit for the main table
+    if ($LimitResults -and $LimitResults -gt 0) {
+        $tableOutput = $tableOutput | Select-Object -First $LimitResults
+    }
+
+    $AppendixInactive = [System.Collections.Generic.List[object]]::new()
+    foreach ($user in $AllUsersDetails) {
+        if ($user.Inactive -eq $true -and $user.Enabled -eq $true) {
+            $AppendixInactive.Add($user)
+        }
+    }
+    $InactiveUsersCount = $AppendixInactive.count
 
 
     #Define the apps to be displayed in detail and sort them by risk score
     $details = $AllUsersDetails | Sort-Object Risk -Descending
+
+    # Apply limit for details
+    if ($LimitResults -and $LimitResults -gt 0) {
+        $details = $details | Select-Object -First $LimitResults
+    }
 
     # Get the total count of group memberships. If this is to high the amount groups in the HTML report will be limited
     $TotalMemberGroups = @($AllUsersDetails.UserMemberGroups).count
@@ -938,8 +982,20 @@ function Invoke-CheckUsers {
     # Initialize StringBuilders
     $DetailTxtBuilder  = [System.Text.StringBuilder]::new()
 
+    # Progress status in verbose mode
+    $detailsCount = $details.count
+    $StatusUpdateInterval = [Math]::Max([Math]::Floor($detailsCount / 10), 1)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Status: Processing user 1 of $detailsCount (updates every $StatusUpdateInterval groups)..."
+    $ProgressCounter = 0    
+
     #Enum the details
     foreach ($item in $details) {
+
+        # Progress status in verbose mode
+        $ProgressCounter++
+        if ($ProgressCounter % $StatusUpdateInterval -eq 0 -or $ProgressCounter -eq $detailsCount) {
+            Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "[*] Status: Processing user $ProgressCounter of $detailsCount ..."
+        }
 
         $ReportingUserInfo = @()
         $ReportingLoginDetails = @()
@@ -948,13 +1004,11 @@ function Invoke-CheckUsers {
         $ReportingOwnerAppRegistration = @()
         $ReportingOwnerSP = @()
         $ReportingOwnerDevice = @()
-        $ReportingOnPremExtensionsDetails = @()
         $ReportingRegisteredDevice = @()
         $ReportingAdminUnits = @()
         $ReportingAppRoles = @()
         $ReportingMemberGroup = @()
         $ReportingAzureRoles = @()
-        $ReportingLicenses = @()
 
         $UserCounter ++
         [void]$DetailTxtBuilder.AppendLine("##############################################################################################################################################################################################################")
@@ -1022,19 +1076,20 @@ function Invoke-CheckUsers {
 
         if (@($item.GroupOwnerDetails).count -ge 1) {
             $ReportingGroupOwner = foreach ($object in $($item.GroupOwnerDetails)) {
+                $MatchingGroup = $AllGroupsDetails[$($Object.id)]
                 [pscustomobject]@{ 
                     "AssignmentType" = $($object.AssignmentType)
-                    "DisplayName" = $($object.DisplayName)
-                    "DisplayNameLink" = "<a href=Groups_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.id)>$($object.DisplayName)</a>"
-                    "Type" = $($object.Type)
-                    "OnPrem" = $($object.OnPrem)
+                    "DisplayName" = $($MatchingGroup.DisplayName)
+                    "DisplayNameLink" = "<a href=Groups_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.id)>$($MatchingGroup.DisplayName)</a>"
+                    "Type" = $($MatchingGroup.Type)
+                    "OnPrem" = $($MatchingGroup.OnPrem)
                     "EntraRoles" = $($object.EntraRoles)
                     "AzureRoles" = $($object.AzureRoles)
                     "AppRoles" = $($object.AppRoles)
                     "CAPs" = $($object.CAPs)
-                    "Users" = $($object.Users)
+                    "Users" = $($MatchingGroup.Users)
                     "Impact" = $($object.Impact)
-                    "Warnings" = $($object.Warnings)
+                    "Warnings" = $($MatchingGroup.Warnings)
                 }
             }
 
@@ -1126,9 +1181,7 @@ function Invoke-CheckUsers {
                 $DeviceDetails = $Devices[$object.id]
                 [pscustomobject]@{ 
                     "Displayname" = $($DeviceDetails.displayName)
-                    "Enabled" = $($DeviceDetails.accountEnabled)
                     "Type" = $($DeviceDetails.trustType)
-                    "Manufacturer" = $($DeviceDetails.Manufacturer)
                     "OS" = "$($DeviceDetails.operatingSystem) / $($DeviceDetails.operatingSystemVersion)"
                 }
             }
@@ -1138,25 +1191,13 @@ function Invoke-CheckUsers {
             [void]$DetailTxtBuilder.AppendLine(($ReportingOwnerDevice | Out-String))
         }
 
-        #On-prem attributes
-        if (@($item.OnPremExtensionsDetails).count -ge 1) {
-            $ReportingOnPremExtensionsDetails = $item.OnPremExtensionsDetails
-            [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine("On-Prem Extension Attributes")
-            [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingOnPremExtensionsDetails | format-table | Out-String))
-            
-        }
-
         #Registered devices
         if (@($item.DeviceRegisteredDetails).count -ge 1) {
             $ReportingRegisteredDevice = foreach ($object in $($item.DeviceRegisteredDetails)) {
                 $DeviceDetails = $Devices[$object.id]
                 [pscustomobject]@{ 
                     "Displayname" = $($DeviceDetails.displayName)
-                    "Enabled" = $($DeviceDetails.accountEnabled)
                     "Type" = $($DeviceDetails.trustType)
-                    "Manufacturer" = $($DeviceDetails.Manufacturer)
                     "OS" = "$($DeviceDetails.operatingSystem) / $($DeviceDetails.operatingSystemVersion)"
                 }
             }
@@ -1218,24 +1259,24 @@ function Invoke-CheckUsers {
             }
             
             $ReportingMemberGroup = foreach ($object in $($item.UserMemberGroups)) {
+                $MatchingGroup = $AllGroupsDetails[$($Object.id)]
                 [pscustomobject]@{
                     "AssignmentType" = $($object.AssignmentType)
-                    "DisplayName" = $($object.DisplayName)
-                    "DisplayNameLink" = "<a href=Groups_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.id)>$($object.DisplayName)</a>"
-                    "Type" = $($object.Type)
-                    "OnPrem" = $($object.OnPrem)
+                    "DisplayName" = $($MatchingGroup.DisplayName)
+                    "DisplayNameLink" = "<a href=Groups_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.id)>$($MatchingGroup.DisplayName)</a>"
+                    "Type" = $($MatchingGroup.Type)
+                    "OnPrem" = $($MatchingGroup.OnPrem)
                     "EntraRoles" = $($object.EntraRoles)
                     "AzureRoles" = $($object.AzureRoles)
                     "AppRoles" = $($object.AppRoles)
                     "CAPs" = $($object.CAPs)
-                    "Users" = $($object.Users)
+                    "Users" = $($MatchingGroup.Users)
                     "Impact" = $($object.Impact)
-                    "Warnings" = $($object.Warnings)
+                    "Warnings" = $($MatchingGroup.Warnings)
                 }
             }
 
-            $ReportingMemberGroup = $ReportingMemberGroup | sort-object Impact -Descending
-            
+           
             [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
             [void]$DetailTxtBuilder.AppendLine("Member of Groups")
             [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
@@ -1285,13 +1326,11 @@ function Invoke-CheckUsers {
             "Owner of App Registration" = $ReportingOwnerAppRegistration
             "Owner of Service Principal" = $ReportingOwnerSP
             "Owner of Devices" = $ReportingOwnerDevice
-            "On-Prem Extension Attributes" = $ReportingOnPremExtensionsDetails
             "Registered Devices" = $ReportingRegisteredDevice
             "Administrative Units" = $ReportingAdminUnits
             "Directly Assigned AppRoles" = $ReportingAppRoles
             "Member of Groups (Transitive)" = $ReportingMemberGroup
             "Azure IAM assignments" = $ReportingAzureRoles
-            "Assigned Licenses" = $ReportingLicenses
         }
     
         [void]$AllObjectDetailsHTML.Add($ObjectDetails)
@@ -1348,7 +1387,7 @@ Execution Warnings = $($WarningReport  -join ' / ')
     $tableOutput | format-table -Property UPN,Enabled,UserType,OnPrem,Licenses,LicenseStatus,Protected,GrpMem,GrpOwn,AuUnits,EntraRoles,AzureRoles,AppRoles,AppRegOwn,SPOwn,DeviceOwn,DeviceReg,Inactive,LastSignInDays,CreatedDays,MfaCap,Impact,Likelihood,Risk,Warnings | Out-File -Width 512 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
     $DetailOutputTxt | Out-File -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
 
-    write-host "[+] Details of $UsersTotalCount users stored in output files (CSV,TXT,HTML): $outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName)"
+    write-host "[+] Details of $($tableOutput.count) users stored in output files (CSV,TXT,HTML): $outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName)"
     
 
     If ($InactiveUsersCount -gt 0) {
@@ -1419,11 +1458,19 @@ Execution Warnings = $($WarningReport  -join ' / ')
         $GlobalAuditSummary.Users.SignInActivity[$_.Name] = $_.Count
     }
 
+    #Dump data for QA checks
+    if ($QAMode) {
+        $AllUsersDetails | ConvertTo-Json -Depth 10 | Out-File -FilePath "$outputFolder\QA_AllUsersDetails.json" -Encoding utf8
+    }
+
     #Convert to Hashtable for faster searches
     $UsersHT = @{}
     foreach ($user in $AllUsersDetails) {
-        $UsersHT[$user.Id] = $user
+        $UsersHT[$user.Id] = [PSCustomObject]@{
+            UPN   = $user.UPN
+        }
     }
+
     Return $UsersHT
 
 }
