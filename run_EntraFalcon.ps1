@@ -209,27 +209,28 @@ $UserAuthMethodsTable = Get-RegisterAuthMethodsUsers
 $Devices = Get-Devices
 
 
-write-host "`n********************************** Enumerating Groups **********************************"
+write-host "`n********************************** [1/8] Enumerating Groups **********************************"
 $AllGroupsDetails = Invoke-CheckGroups -AdminUnitWithMembers $AdminUnitWithMembers -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -ConditionalAccessPolicies $Caps -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -TenantPimForGroupsAssignments $TenantPimForGroupsAssignments -OutputFolder $OutputFolder -Devices $Devices -Verbose:$VerbosePreference @optionalParamsUserandGroup
 
-write-host "`n********************************** Enumerating Enterprise Apps **********************************"
+write-host "`n********************************** [2/8] Enumerating Enterprise Apps **********************************"
 $EnterpriseApps = Invoke-CheckEnterpriseApps -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -AllGroupsDetails $AllGroupsDetails -OutputFolder $OutputFolder -Verbose:$VerbosePreference @optionalParamsET
 
-write-host "`n********************************** Enumerating Managed Identities **********************************"
+write-host "`n********************************** [3/8] Enumerating Managed Identities **********************************"
 $ManagedIdentities = Invoke-CheckManagedIdentities -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -AllGroupsDetails $AllGroupsDetails -OutputFolder $OutputFolder -Verbose:$VerbosePreference
 
-write-host "`n********************************** Enumerating App Registrations **********************************"
+write-host "`n********************************** [4/8] Enumerating App Registrations **********************************"
 $AppRegistrations = Invoke-CheckAppRegistrations -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -EnterpriseApps $EnterpriseApps -AllGroupsDetails $AllGroupsDetails -TenantRoleAssignments $TenantRoleAssignments -OutputFolder $OutputFolder -Verbose:$VerbosePreference
 
-write-host "`n********************************** Enumerating Users **********************************"
+write-host "`n********************************** [5/8] Enumerating Users **********************************"
 $Users = Invoke-CheckUsers -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -EnterpriseApps $EnterpriseApps -AllGroupsDetails $AllGroupsDetails -ConditionalAccessPolicies $Caps -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -AppRegistrations $AppRegistrations -AdminUnitWithMembers $AdminUnitWithMembers -TenantPimForGroupsAssignments $TenantPimForGroupsAssignments -UserAuthMethodsTable $UserAuthMethodsTable -Devices $Devices -OutputFolder $OutputFolder -Verbose:$VerbosePreference @optionalParamsUserandGroup
 
-write-host "`n********************************** Generating Role Assignments **********************************"
+write-host "`n********************************** [6/8] Generating Role Assignments **********************************"
 Invoke-CheckRoles -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -EnterpriseApps $EnterpriseApps -AllGroupsDetails $AllGroupsDetails -AzureIAMAssignments $AzureIAMAssignments -TenantRoleAssignments $TenantRoleAssignments -AppRegistrations $AppRegistrations -AdminUnitWithMembers $AdminUnitWithMembers -Users $Users -ManagedIdentities $ManagedIdentities -OutputFolder $OutputFolder -Verbose:$VerbosePreference
 
-write-host "`n********************************** Generating CAP Report **********************************"
+write-host "`n********************************** [7/8] Generating CAP Report **********************************"
 Invoke-CheckCaps -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -AllGroupsDetails $AllGroupsDetails -Users $Users -OutputFolder $OutputFolder -TenantRoleAssignments $TenantRoleAssignments -Verbose:$VerbosePreference
 
+write-host "`n********************************** [8/8] Generating Summary Report **********************************"
 # Show assessment summary and generate summary HTML report
 Export-Summary -CurrentTenant $CurrentTenant -StartTimestamp $StartTimestamp -OutputFolder $OutputFolder -Verbose:$VerbosePreference
 
