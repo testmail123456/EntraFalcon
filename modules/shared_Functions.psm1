@@ -3564,6 +3564,7 @@ function start-CleanUp {
     remove-variable -Scope Global GLOBALEntraRoleRating -ErrorAction SilentlyContinue
     remove-variable -Scope Global GLOBALAzureRoleRating -ErrorAction SilentlyContinue
     remove-variable -Scope Global GLOBALImpactScore -ErrorAction SilentlyContinue
+    remove-variable -Scope Global GLOBALPIMsGraphAccessToken -ErrorAction SilentlyContinue
 }
 
 function Write-LogVerbose {
