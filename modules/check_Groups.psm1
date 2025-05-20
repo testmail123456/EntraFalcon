@@ -233,12 +233,12 @@ function Invoke-CheckGroups {
     $Title = "Groups"
     $ProgressCounter = 0
     $TokenCheckLimit = 5000  # Define recheck limit for token lifetime. In large environments the access token might expire during the test.
-    $GroupScriptWarningList = @()
+    $GroupScriptWarningList = [System.Collections.Generic.List[string]]::new()
     $NestedGroupsHighvalue = [System.Collections.Generic.List[object]]::new()
 	$AllGroupsDetails = [System.Collections.Generic.List[object]]::new()
     $AllObjectDetailsHTML = [System.Collections.ArrayList]::new()
     $DetailOutputTxt = ""
-    if (-not $GLOBALGraphExtendedChecks) {$GroupScriptWarningList += "Only active role assignments assessed!"}
+    if (-not $GLOBALGraphExtendedChecks) {$GroupScriptWarningList.Add("Only active role assignments assessed!")}
 
     $GroupImpactScore = @{
         "M365Group"                 = 1
@@ -441,17 +441,17 @@ function Invoke-CheckGroups {
 
     # Check if Azure IAM roles were checked
     if (-not ($GLOBALAzurePsChecks)) {
-        $GroupScriptWarningList += "Group Azure IAM assignments were not assessed"
+        $GroupScriptWarningList.Add("Group Azure IAM assignments were not assessed")
     }
 
     #Check if CAP have been assessed
     if (-not ($GLOBALPermissionForCaps)) {
-        $GroupScriptWarningList += "Group CAPs assignments were not assessed"
+        $GroupScriptWarningList.Add("Group CAPs assignments were not assessed")
     }
 
     #Check if PIM for groups was checked
     if (-not ($GLOBALPimForGroupsChecked)) {
-        $GroupScriptWarningList += "Pim for Groups was not assessed!"
+        $GroupScriptWarningList.Add("Pim for Groups was not assessed!")
     }
 
     Write-Host "[*] Getting all group memberships"
@@ -460,7 +460,7 @@ function Invoke-CheckGroups {
     $ChunkCount = [math]::Ceiling($GroupsTotalCount / $BatchSize)
     
     for ($chunkIndex = 0; $chunkIndex -lt $ChunkCount; $chunkIndex++) {
-        Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Processing batch $($chunkIndex + 1) of $ChunkCount..."
+        Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Processing batch $($chunkIndex + 1) of $ChunkCount..."                  
     
         $StartIndex = $chunkIndex * $BatchSize
         $EndIndex = [math]::Min($StartIndex + $BatchSize - 1, $GroupsTotalCount - 1)
@@ -485,6 +485,7 @@ function Invoke-CheckGroups {
             }
         }
     }
+
 
     foreach ($group in $GroupMembers.Values) {
         $TotalGroupMembers += $group.Count
@@ -961,7 +962,7 @@ function Invoke-CheckGroups {
                 [void]$Warnings.Add("Group protected by restricted AU")
             }
         }
-        
+
         # Check if the script has permission to enumerate CAPs
         if ($GLOBALPermissionForCaps) {
 
@@ -990,11 +991,11 @@ function Invoke-CheckGroups {
             }
 
             # Add the CAP information to the group properties if any CAPs were found
-            if (@($groupCAPs).Count -ge 1) {
-                $CAPCount = @($groupCAPs).Count
+            if ($groupCAPs.Count -ge 1) {
+                $CAPCount = $groupCAPs.Count
             } else {
                 $CAPCount = 0
-                $groupCAPs = @()
+                $groupCAPs = $null
 
             }
         } else {

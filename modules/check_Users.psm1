@@ -43,10 +43,10 @@ function Invoke-CheckUsers {
     $PermissionUserSignInActivity = $true
     $AllUsersDetails = [System.Collections.ArrayList]::new()
     $AllObjectDetailsHTML = [System.Collections.ArrayList]::new()
-    $WarningReport = @()
-    if (-not $GLOBALGraphExtendedChecks) {$WarningReport += "Only active role assignments assessed!"}
-    if (-not ($GLOBALPimForGroupsChecked)) {$WarningReport += "Pim for Groups was not assessed!"}
-    if (-not ($GLOBALAzurePsChecks)) {$WarningReport += "Users Azure IAM assignments were not assessed!"}
+    $WarningReport = [System.Collections.Generic.List[string]]::new()
+    if (-not $GLOBALGraphExtendedChecks) {$WarningReport.Add("Only active role assignments assessed!")}
+    if (-not ($GLOBALPimForGroupsChecked)) {$WarningReport.Add("Pim for Groups was not assessed!")}
+    if (-not ($GLOBALAzurePsChecks)) {$WarningReport.Add("Users Azure IAM assignments were not assessed!")}
     $UserImpact = @{
     "Base"                      = 1
     "DirectAppRoleNormal"       = 10
@@ -150,7 +150,7 @@ function Invoke-CheckUsers {
         } else {
             write-host "[!] Auth error: $($_.Exception.Message -split '\n'). Can't retrieve SignInActivity."
         }
-        $WarningReport += "No permissions to retrieve users SignInActivity properties. Inactive users are not marked."
+        $WarningReport.Add("No permissions to retrieve users SignInActivity properties. Inactive users are not marked.")
         $PermissionUserSignInActivity = $false
     }
 
@@ -974,7 +974,7 @@ function Invoke-CheckUsers {
     $TotalMemberGroups = @($AllUsersDetails.UserMemberGroups).count
     if ($TotalMemberGroups -ge 20000) {
         $LimitGroupMembers = $true
-        $WarningReport += "GroupMembership: Only 10 groups are displayed to ensure HTML performance."
+        $WarningReport.Add("GroupMembership: Only 10 groups are displayed to ensure HTML performance.")
     } else {
         $LimitGroupMembers = $false
     }
@@ -1353,7 +1353,7 @@ function Invoke-CheckUsers {
     #Define header HTML
     $headerHTML = [pscustomobject]@{ 
         "Executed in Tenant" = "$($CurrentTenant.DisplayName) / ID: $($CurrentTenant.id)"
-        "Executed at" = "$StartTimestamp "
+        "Executed at" = "$StartTimestamp"
         "Execution Warnings" = $WarningReport -join ' / '
     }
 
