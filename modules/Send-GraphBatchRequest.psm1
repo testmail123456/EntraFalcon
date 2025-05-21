@@ -199,9 +199,6 @@ function Send-GraphBatchRequest {
                     }
                     if ($ResultData.'@odata.nextLink') {
                         $GlobalNextLinks.Add("$($Resp.id)|$($ResultData.'@odata.nextLink')")
-						if ($Resp.id -notmatch '^[0-9a-fA-F\-]{36}$') {
-							Write-Warning "[{0}] Suspicious ID captured during pagination: '{1}'" -f (Get-Date -Format "HH:mm:ss"), $Resp.id
-						}
                     }
                 } else {
                     $ErrorCode = $Resp.body.error.code
@@ -247,7 +244,7 @@ function Send-GraphBatchRequest {
 
         foreach ($id in $BatchResult.values.Keys) {
             if (-not $PagedResultsMap.ContainsKey($id)) {
-                Write-Warning "[{0}] [!] Missing first-page data for ID $id - initializing empty list." -f (Get-Date -Format "HH:mm:ss")
+                Write-Warning ("[{0}] [!] Missing first-page data for ID {1} - initializing empty list." -f (Get-Date -Format "HH:mm:ss"), $id)
                 $PagedResultsMap[$id] = New-Object 'System.Collections.Generic.List[object]'
             }
         
