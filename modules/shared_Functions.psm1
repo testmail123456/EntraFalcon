@@ -2311,6 +2311,7 @@ function Get-RegisterAuthMethodsUsers {
 
     $QueryParameters = @{
         '$select' = "Id,IsMfaCapable"
+        '$top' = "5000"
     }
     try {
         $RegisteredAuthMethods = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/reports/authenticationMethods/userRegistrationDetails" -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -ErrorAction Stop
@@ -2336,6 +2337,7 @@ function Get-Devices {
 
     $QueryParameters = @{
         '$select' = "Id,accountEnabled,displayName,Manufacturer,trustType,operatingSystem,operatingSystemVersion"
+        '$top' = "999"
     }
 
     $DevicesRaw = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/devices" -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)

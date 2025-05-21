@@ -160,10 +160,12 @@ function Invoke-CheckUsers {
     if ($PermissionUserSignInActivity) {
         $QueryParameters = @{
             '$select' = "Id,DisplayName,UserPrincipalName,AccountEnabled,UserType,AssignedLicenses,OtherMails,OnPremisesSyncEnabled,SignInActivity,CreatedDateTime,JobTitle,Department"
+            '$top' = "999"
         }
     } else {
         $QueryParameters = @{
             '$select' = "Id,DisplayName,UserPrincipalName,AccountEnabled,UserType,AssignedLicenses,OtherMails,OnPremisesSyncEnabled,CreatedDateTime,JobTitle,Department"
+            '$top' = "999"
         } 
     }
     $AllUsers = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/users" -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)
@@ -196,7 +198,7 @@ function Invoke-CheckUsers {
         }
 
         # Send batched request
-        $Response = Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id'}
+        $Response = Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id'; '$top'='999'}
 
         # Parse and store results
         foreach ($item in $Response) {
@@ -247,7 +249,7 @@ function Invoke-CheckUsers {
         $Requests.Add($req)
     }
     # Send Batch request and create a hashtable
-    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id'})
+    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id' ;'$top'='999'})
     $UserOwnedObjectsRaw = @{}
     foreach ($item in $RawResponse) {
         if ($item.response.value -and $item.response.value.Count -gt 0) {
@@ -271,7 +273,7 @@ function Invoke-CheckUsers {
         $Requests.Add($req)
     }
     # Send Batch request and create a hashtable
-    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id'})
+    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id'; '$top'='999'})
     $DeviceOwnerRaw = @{}
     foreach ($item in $RawResponse) {
         if ($item.response.value -and $item.response.value.Count -gt 0) {
@@ -295,7 +297,7 @@ function Invoke-CheckUsers {
         $Requests.Add($req)
     }
     # Send Batch request and create a hashtable
-    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id'})
+    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id'; '$top'='999'})
     $DeviceRegisteredRaw = @{}
     foreach ($item in $RawResponse) {
         if ($item.response.value -and $item.response.value.Count -gt 0) {

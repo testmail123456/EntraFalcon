@@ -408,7 +408,8 @@ function Invoke-CheckGroups {
 
     Write-Host "[*] Get Groups"
     $QueryParameters = @{ 
-        '$select' = 'Id,DisplayName,Visibility,GroupTypes,SecurityEnabled,IsAssignableToRole,OnPremisesSyncEnabled,MailEnabled,Description,MembershipRule' 
+        '$select' = 'Id,DisplayName,Visibility,GroupTypes,SecurityEnabled,IsAssignableToRole,OnPremisesSyncEnabled,MailEnabled,Description,MembershipRule'
+        '$top' = "999"
     }
     $AllGroups = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri '/groups' -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)
 
@@ -476,7 +477,7 @@ function Invoke-CheckGroups {
         }
     
         # Send the batch
-        $Response = Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id,userType,onPremisesSyncEnabled'}
+        $Response = Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'id,userType,onPremisesSyncEnabled' ;'$top'='999'}
 
         # Store results
         foreach ($item in $Response) {
@@ -553,7 +554,7 @@ function Invoke-CheckGroups {
         $Requests.Add($req)
     }
     # Send Batch request and create a hashtable
-    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI  -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'ResourceDisplayName,ResourceId,AppRoleId'})
+    $RawResponse = (Send-GraphBatchRequest -AccessToken $GLOBALmsGraphAccessToken.access_token -Requests $Requests -BetaAPI  -UserAgent $($GlobalAuditSummary.UserAgent.Name) -QueryParameters @{'$select' = 'ResourceDisplayName,ResourceId,AppRoleId' ;'$top'='999'})
     $AppRoleAssignmentsRaw = @{}
     foreach ($item in $RawResponse) {
         if ($item.response.value -and $item.response.value.Count -gt 0) {
@@ -600,6 +601,7 @@ function Invoke-CheckGroups {
     #Basic User Info to avoid storing the information in a large object
     $QueryParameters = @{
         '$select' = "Id,UserPrincipalName,UserType,accountEnabled,onPremisesSyncEnabled"
+        '$top' = "999"
       }
       $RawResponse = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/users" -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)
     $AllUsersBasicHT = @{}
@@ -610,6 +612,7 @@ function Invoke-CheckGroups {
     #Basic ServicePrincipal Info to avoid storing the information in a large object
     $QueryParameters = @{
         '$select' = "id,displayName,accountEnabled,appOwnerOrganizationId,publisherName,servicePrincipalType"
+        '$top' = "999"
     }
     $RawResponse = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri '/servicePrincipals' -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)
     $AllSPBasicHT = @{}
