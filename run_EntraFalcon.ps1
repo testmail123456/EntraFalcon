@@ -90,9 +90,8 @@ if ($ManualCode.IsPresent) {
     $AuthMethod = "ManualCode"
 }
 
-
 #Constants
-$EntraFalconVersion = "V20250518"
+$EntraFalconVersion = "V20250522"
 
 #Define additional authentication parameters
 $Global:GLOBALAuthParameters = @{}
