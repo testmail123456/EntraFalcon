@@ -29,6 +29,8 @@ function Invoke-CheckUsers {
 
 
     ############################## Script section ########################
+    $PmScript = [System.Diagnostics.Stopwatch]::StartNew()
+    $PmInitTasks = [System.Diagnostics.Stopwatch]::StartNew()
 
     Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Start user script"
 
@@ -134,7 +136,9 @@ function Invoke-CheckUsers {
         }
     }
 
+    $PmInitTasks.Stop()
     ########################################## SECTION: DATACOLLECTION ##########################################
+    $PmDataCollection = [System.Diagnostics.Stopwatch]::StartNew()
 
 
     # Checking if users SignInActivity property can be retrieved. Requires Premium otherwise HTTP 403:Tenant is not a B2C tenant and doesn't have premium license
@@ -305,7 +309,9 @@ function Invoke-CheckUsers {
         }
     }    
 
+    $PmDataCollection.Stop()
     ########################################## SECTION: User Processing ##########################################
+    $PmDataProcessing = [System.Diagnostics.Stopwatch]::StartNew()
 
     #Calc dynamic update interval
     $StatusUpdateInterval = [Math]::Max([Math]::Floor($UsersTotalCount / 10), 1)
@@ -945,6 +951,10 @@ function Invoke-CheckUsers {
 
 
     }
+
+    $PmDataProcessing.Stop()
+    $PmDataPostProcessing = [System.Diagnostics.Stopwatch]::StartNew()
+
     write-host "[*] Processing results"
 
     #Define output of the main table
@@ -980,6 +990,9 @@ function Invoke-CheckUsers {
     } else {
         $LimitGroupMembers = $false
     }
+
+    $PmDataPostProcessing.Stop()
+    $PmGeneratingDetails = [System.Diagnostics.Stopwatch]::StartNew()
 
     # Initialize StringBuilders
     $DetailTxtBuilder  = [System.Text.StringBuilder]::new()
@@ -1336,20 +1349,9 @@ function Invoke-CheckUsers {
         }
     
         [void]$AllObjectDetailsHTML.Add($ObjectDetails)
-
-
     }
 
     $DetailOutputTxt  = $DetailTxtBuilder.ToString()
-
-    write-host "[+] Writing log files"
-    write-host ""
-
-    $mainTable = $tableOutput | select-object -Property @{Name = "UPN"; Expression = { $_.UPNlink}},Enabled,UserType,OnPrem,LicenseStatus,Protected,GrpMem,GrpOwn,AuUnits,EntraRoles,AzureRoles,AppRoles,AppRegOwn,SPOwn,DeviceOwn,DeviceReg,Inactive,LastSignInDays,CreatedDays,MfaCap,Impact,Likelihood,Risk,Warnings
-    $mainTableJson  = $mainTable | ConvertTo-Json -Depth 5 -Compress
-
-    $mainTableHTML = $GLOBALMainTableDetailsHEAD + "`n" + $mainTableJson + "`n" + '</script>'
-
 
 
     #Define header HTML
@@ -1380,6 +1382,16 @@ Execution Warnings = $($WarningReport  -join ' / ')
 ************************************************************************************************************************
 "
 
+    $PmGeneratingDetails.Stop()
+    $PmWritingReports = [System.Diagnostics.Stopwatch]::StartNew()
+    write-host "[+] Writing log files"
+    write-host ""
+
+    $mainTable = $tableOutput | select-object -Property @{Name = "UPN"; Expression = { $_.UPNlink}},Enabled,UserType,OnPrem,LicenseStatus,Protected,GrpMem,GrpOwn,AuUnits,EntraRoles,AzureRoles,AppRoles,AppRegOwn,SPOwn,DeviceOwn,DeviceReg,Inactive,LastSignInDays,CreatedDays,MfaCap,Impact,Likelihood,Risk,Warnings
+    $mainTableJson  = $mainTable | ConvertTo-Json -Depth 5 -Compress
+
+    $mainTableHTML = $GLOBALMainTableDetailsHEAD + "`n" + $mainTableJson + "`n" + '</script>'
+
     # Build header section
     $headerHTML = $headerHTML | ConvertTo-Html -Fragment -PreContent "<div id=`"loadingOverlay`"><div class=`"spinner`"></div><div class=`"loading-text`">Loading data...</div></div><nav id=`"topNav`"></nav><h1>$($Title) Enumeration</h1>" -As List -PostContent "<h2>$($Title) Overview</h2>"
 
@@ -1400,6 +1412,9 @@ Execution Warnings = $($WarningReport  -join ' / ')
     #Write HTML
     $Report = ConvertTo-HTML -Body "$headerHTML $mainTableHTML" -Title "$Title enumeration" -Head $GLOBALcss -PostContent $GLOBALJavaScript -PreContent $AllObjectDetailsHTML
     $Report | Out-File "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).html"
+
+    $PmWritingReports.Stop()
+    $PmEndTasks = [System.Diagnostics.Stopwatch]::StartNew()
 
     #Add information to the enumeration summary
     $GuestCount = 0
@@ -1472,6 +1487,19 @@ Execution Warnings = $($WarningReport  -join ' / ')
             UPN   = $user.UPN
         }
     }
+
+    $PmEndTasks.Stop()
+    $PmScript.Stop()
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "=== Performance Summary ==="
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Init Tasks:           {0:N2} s" -f $PmInitTasks.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Data Collection:      {0:N2} s" -f $PmDataCollection.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Data Processing:      {0:N2} s" -f $PmDataProcessing.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Post-Processing:      {0:N2} s" -f $PmDataPostProcessing.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Generating Details:   {0:N2} s" -f $PmGeneratingDetails.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Writing Reports:      {0:N2} s" -f $PmWritingReports.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("EndTasks:             {0:N2} s" -f $PmEndTasks.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("-------------------------------")
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Total Script Time:    {0:N2} s" -f $PmScript.Elapsed.TotalSeconds)
 
     Return $UsersHT
 

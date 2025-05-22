@@ -223,6 +223,9 @@ function Invoke-CheckGroups {
           
 
     ############################## Script section ########################
+    $PmScript = [System.Diagnostics.Stopwatch]::StartNew()
+    $PmInitTasks = [System.Diagnostics.Stopwatch]::StartNew()
+
 
     Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Start group script"
 
@@ -404,7 +407,9 @@ function Invoke-CheckGroups {
         }
     }
 
+    $PmInitTasks.Stop()
     ########################################## SECTION: DATACOLLECTION ##########################################
+    $PmDataCollection = [System.Diagnostics.Stopwatch]::StartNew()
 
     Write-Host "[*] Get Groups"
     $QueryParameters = @{ 
@@ -422,7 +427,7 @@ function Invoke-CheckGroups {
         Return $AllGroupsDetailsHT
     }
     
-    ########################################## SECTION: Group Processing ##########################################
+
 
     #Build Hashtable with basic group info. Needed in nesting scenarios to git information about parent / child group
     $AllGroupsHT = @{}
@@ -628,6 +633,9 @@ function Invoke-CheckGroups {
     remove-variable AllUsersBasic -ErrorAction SilentlyContinue
     remove-variable GroupMembers -ErrorAction SilentlyContinue
     
+    $PmDataCollection.Stop()
+    ########################################## SECTION: Group Processing ##########################################
+    $PmDataProcessing = [System.Diagnostics.Stopwatch]::StartNew()
 
     #Calc dynamic update interval
     $StatusUpdateInterval = [Math]::Max([Math]::Floor($GroupsTotalCount / 10), 1)
@@ -1313,7 +1321,9 @@ function Invoke-CheckGroups {
 
     }
 
+    $PmDataProcessing.Stop()
     ########################################## SECTION: POST-PROCESSING ##########################################
+    $PmDataPostProcessing = [System.Diagnostics.Stopwatch]::StartNew()
     write-host "[*] Post-processing group nesting"
 
     # Create a hashtable for faster group lookup by ID (used throughout post-processing)
@@ -1348,7 +1358,7 @@ function Invoke-CheckGroups {
 
     # Reprocessing nested groups in groups which give access to potential critical ressources -> Nested group is adjusted
     # Note: Nested groups do not inherit AppRoles
-    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Processing $($NestedGroupsHighvalue.Count) high value groups"
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Processing $($NestedGroupsHighvalue.Count) high value groups with nestings"
     # Tracks already processed groupID→targetID combinations
     $processedGroupHighValuePairs = New-Object System.Collections.Generic.HashSet[string]
 
@@ -1482,7 +1492,10 @@ function Invoke-CheckGroups {
 
 
     Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Processed all groups with nestings"
+
+    $PmDataPostProcessing.Stop()
     ########################################## SECTION: OUTPUT DEFINITION ##########################################
+    $PmGeneratingDetails = [System.Diagnostics.Stopwatch]::StartNew()
 
     write-host "[*] Generating Details Section"
 
@@ -2209,6 +2222,7 @@ function Invoke-CheckGroups {
 
     $DetailOutputTxt = $DetailTxtBuilder.ToString()
 
+
     write-host "[*] Writing Reports"
     write-host ""
 
@@ -2248,7 +2262,9 @@ $AppendixTitle = "
 Appendix: Dynamic Groups
 ###############################################################################################################################################
     "
-
+    
+    $PmGeneratingDetails.Stop()
+    $PmWritingReports = [System.Diagnostics.Stopwatch]::StartNew()
 
     # Prepare HTML output
     $headerHTML = $headerHTML | ConvertTo-Html -Fragment -PreContent "<div id=`"loadingOverlay`"><div class=`"spinner`"></div><div class=`"loading-text`">Loading data...</div></div><nav id=`"topNav`"></nav><h1>$($Title) Enumeration</h1>" -As List -PostContent "<h2>$($Title) Overview</h2>"
@@ -2275,7 +2291,8 @@ Appendix: Dynamic Groups
     $Report = ConvertTo-HTML -Body "$headerHTML $mainTableHTML" -Title "$Title enumeration" -Head $GLOBALcss -PostContent $PostContentCombined -PreContent $AllObjectDetailsHTML
     $Report | Out-File "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).html"
 
-
+    $PmWritingReports.Stop()
+    $PmEndTasks = [System.Diagnostics.Stopwatch]::StartNew()
 
     #Add information to the enumeration summary
     $M365Count = 0
@@ -2346,6 +2363,19 @@ Appendix: Dynamic Groups
     Remove-Variable AllGroupsDetails
     Remove-Variable details
 
-    
+    $PmEndTasks.Stop()
+    $PmScript.Stop()
+
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "=== Performance Summary ==="
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Init Tasks:           {0:N2} s" -f $PmInitTasks.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Data Collection:      {0:N2} s" -f $PmDataCollection.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Data Processing:      {0:N2} s" -f $PmDataProcessing.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Post-Processing:      {0:N2} s" -f $PmDataPostProcessing.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Generating Details:   {0:N2} s" -f $PmGeneratingDetails.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Writing Reports:      {0:N2} s" -f $PmWritingReports.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("EndTasks:             {0:N2} s" -f $PmEndTasks.Elapsed.TotalSeconds)
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("-------------------------------")
+    Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message ("Total Script Time:    {0:N2} s" -f $PmScript.Elapsed.TotalSeconds)
+
     return $AllGroupsDetailsHT
 }
