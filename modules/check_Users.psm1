@@ -207,11 +207,11 @@ function Invoke-CheckUsers {
         # Parse and store results
         foreach ($item in $Response) {
             if ($item.response.value -and $item.response.value.Count -gt 0) {
-                $groupIds = @()
+                $groupIds = [System.Collections.Generic.List[string]]::new()
 
                 foreach ($entry in $item.response.value) {
                     if ($entry.'@odata.type' -eq '#microsoft.graph.group') {
-                        $groupIds += $entry.id
+                        $groupIds.Add($entry.id)
                     }
                 }
 
