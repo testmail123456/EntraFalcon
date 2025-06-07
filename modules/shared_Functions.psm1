@@ -115,6 +115,7 @@ $global:GLOBALJavaScript = @'
                         Protected: "=false",
                         EntraRoles: "or_>0",
                         AzureRoles: "or_>0",
+                        CAPs: "or_>0",
                         Warnings: "or_Eligible"
                     },
                     columns: ["DisplayName", "Type", "Dynamic", "Protected", "SecurityEnabled", "Visibility", "Users", "Devices", "AzureRoles", "NestedInGroups", "AppRoles", "CAPs", "EntraRoles", "Impact", "Likelihood", "Risk", "Warnings"]
@@ -3545,6 +3546,42 @@ function start-InitTasks {
     }
 }
 
+# Function to help built the TXT report (avoiding using slow stuff like format-table)
+function Format-ReportSection {
+    param (
+        [string]$Title,
+        [array]$Objects,
+        [string[]]$Properties,
+        [hashtable]$ColumnWidths
+    )
+
+    $sb = New-Object System.Text.StringBuilder
+
+    $line = "=" * 120
+    [void]$sb.AppendLine($line)
+    [void]$sb.AppendLine($Title)
+    [void]$sb.AppendLine($line)
+
+    # Header
+    $header = ""
+    foreach ($prop in $Properties) {
+        $header += ("{0,-$($ColumnWidths[$prop])} " -f $prop)
+    }
+    [void]$sb.AppendLine($header)
+
+    # Rows
+    foreach ($obj in $Objects) {
+        $row = ""
+        foreach ($prop in $Properties) {
+            $val = $obj.$prop
+            $row += ("{0,-$($ColumnWidths[$prop])} " -f $val)
+        }
+        [void]$sb.AppendLine($row)
+    }
+
+    return $sb.ToString()
+}
+
 # Remove global variables
 function start-CleanUp {
     remove-variable -Scope Global GLOBALMsGraphAccessToken -ErrorAction SilentlyContinue
@@ -3604,4 +3641,4 @@ function Show-EntraFalconBanner {
     Write-Host ""
 }
 
-Export-ModuleMember -Function Show-EntraFalconBanner,AuthenticationMSGraph,Get-Devices,start-CleanUp,Get-OrgInfo,Write-LogVerbose,Invoke-AzureRoleProcessing,Get-RegisterAuthMethodsUsers,Invoke-EntraRoleProcessing,Get-EntraPIMRoleAssignments,AuthCheckMSGraph,RefreshAuthenticationMsGraph,Get-PimforGroupsAssignments,Invoke-CheckTokenExpiration,Invoke-MsGraphAuthPIM,EnsureAuthMsGraph,Get-AzureRoleDetails,Get-AdministrativeUnitsWithMembers,Get-ConditionalAccessPolicies,Get-EntraRoleAssignments,Get-APIPermissionCategory,Get-ObjectInfo,EnsureAuthAzurePsNative,checkSubscriptionNative,Get-AllAzureIAMAssignmentsNative,Get-PIMForGroupsAssignmentsDetails,Show-EnumerationSummary,start-InitTasks
+Export-ModuleMember -Function Show-EntraFalconBanner,AuthenticationMSGraph,Get-Devices,start-CleanUp,Format-ReportSection,Get-OrgInfo,Write-LogVerbose,Invoke-AzureRoleProcessing,Get-RegisterAuthMethodsUsers,Invoke-EntraRoleProcessing,Get-EntraPIMRoleAssignments,AuthCheckMSGraph,RefreshAuthenticationMsGraph,Get-PimforGroupsAssignments,Invoke-CheckTokenExpiration,Invoke-MsGraphAuthPIM,EnsureAuthMsGraph,Get-AzureRoleDetails,Get-AdministrativeUnitsWithMembers,Get-ConditionalAccessPolicies,Get-EntraRoleAssignments,Get-APIPermissionCategory,Get-ObjectInfo,EnsureAuthAzurePsNative,checkSubscriptionNative,Get-AllAzureIAMAssignmentsNative,Get-PIMForGroupsAssignmentsDetails,Show-EnumerationSummary,start-InitTasks
