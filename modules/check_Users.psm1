@@ -330,7 +330,12 @@ function Invoke-CheckUsers {
         $LastInteractiveSignIn = $item.SignInActivity.LastSignInDateTime
         $LastNonInteractiveSignIn = $item.SignInActivity.LastNonInteractiveSignInDateTime
         $LastSuccessfulSignInTime = $item.SignInActivity.lastSuccessfulSignInDateTime
-        $CreatedDays = (New-TimeSpan -Start $item.CreatedDateTime).Days
+        #Null check in case CreatedDateTime is $null
+        if ($item.CreatedDateTime) {
+            $CreatedDays = (New-TimeSpan -Start $item.CreatedDateTime).Days
+        } else {
+            $CreatedDays = $null
+        }
         $EntraRolesTroughGroupOwnership = 0
         $EntraRolesTroughGroupMembership = 0
         $AzureRolesTroughGroupOwnership = 0
