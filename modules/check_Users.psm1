@@ -46,6 +46,7 @@ function Invoke-CheckUsers {
     $AllUsersDetails = [System.Collections.ArrayList]::new()
     $AllObjectDetailsHTML = [System.Collections.ArrayList]::new()
     $WarningReport = [System.Collections.Generic.List[string]]::new()
+    $EscapedTenantName = [System.Uri]::EscapeDataString($CurrentTenant.DisplayName)
     if (-not $GLOBALGraphExtendedChecks) {$WarningReport.Add("Only active role assignments assessed!")}
     if (-not ($GLOBALPimForGroupsChecked)) {$WarningReport.Add("Pim for Groups was not assessed!")}
     if (-not ($GLOBALAzurePsChecks)) {$WarningReport.Add("Users Azure IAM assignments were not assessed!")}
@@ -983,7 +984,7 @@ function Invoke-CheckUsers {
     }
 
     # Get the total count of group memberships. If this is to high the amount groups in the HTML report will be limited
-    $TotalMemberGroups = @($AllUsersDetails.UserMemberGroups).count
+    $TotalMemberGroups = $($AllUsersDetails.UserMemberGroups).count
     if ($TotalMemberGroups -ge 20000) {
         $LimitGroupMembers = $true
         $WarningReport.Add("GroupMembership: Only 10 groups are displayed to ensure HTML performance.")
@@ -1009,7 +1010,7 @@ function Invoke-CheckUsers {
         # Progress status in verbose mode
         $ProgressCounter++
         if ($ProgressCounter % $StatusUpdateInterval -eq 0 -or $ProgressCounter -eq $detailsCount) {
-            Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "[*] Status: Processing user $ProgressCounter of $detailsCount ..."
+            Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Status: Processing user $ProgressCounter of $detailsCount ..."
         }
 
         $ReportingUserInfo = @()
@@ -1022,20 +1023,20 @@ function Invoke-CheckUsers {
         $ReportingRegisteredDevice = @()
         $ReportingAdminUnits = @()
         $ReportingAppRoles = @()
-        $ReportingMemberGroup = @()
+        $ReportingMemberGroup = [System.Collections.Generic.List[object]]::new()
         $ReportingAzureRoles = @()
 
         $UserCounter ++
         [void]$DetailTxtBuilder.AppendLine("##############################################################################################################################################################################################################")
 
         $ReportingUserInfo = [pscustomobject]@{
-            "Display Name" = $($item.DisplayName)
-            "User UPN" = $($item.Upn)
-            "User ObjectID" = $($item.Id)
-            "Protected" = $($item.Protected)
-            "RiskScore" = $($item.Risk)
-            "UserType" = $($item.UserType)
-            "Created" = "$($item.CreatedDateTime) ($($item.CreatedDays) days ago)"
+            "Display Name" = $item.DisplayName
+            "User UPN" = $item.Upn
+            "User ObjectID" = $item.Id
+            "Protected" = $item.Protected
+            "RiskScore" = $item.Risk
+            "UserType" = $item.UserType
+            "Created" = "{0} ({1} days ago)" -f $item.CreatedDateTime, $item.CreatedDays
         }
         #Add sign-in info to the list if it's not shown in a dedicated table
         if ($null -ne $item.Department) {
@@ -1052,21 +1053,40 @@ function Invoke-CheckUsers {
             $ReportingUserInfo | Add-Member -NotePropertyName Warnings -NotePropertyValue $item.Warnings
         }
 
-        [void]$DetailTxtBuilder.AppendLine(($ReportingUserInfo | Out-String))
+        foreach ($prop in $ReportingUserInfo.PSObject.Properties) {
+            $name = if ($null -ne $prop.Name) { $prop.Name } else { "Unknown" }
+
+            # Safely convert any value type to string
+            if ($null -eq $prop.Value) {
+                $value = ""
+            } elseif ($prop.Value -is [System.Array]) {
+                $value = ($prop.Value -join ', ')
+            } else {
+                $value = $prop.Value.ToString()
+            }
+
+            [void]$DetailTxtBuilder.AppendLine("$name : $value")
+        }
+        [void]$DetailTxtBuilder.AppendLine("")
 
         #Hide Login details section if user had not enough permissions to read the attributes
         if ($PermissionUserSignInActivity) {
+            $lastSuccessful     = "{0} ({1} days ago)" -f $item.lastSuccessfulSignInDateTime, $item.LastSignInDays
+            $lastInteractive    = "{0} ({1} days ago)" -f $item.LastInteractiveSignInDateTime, $item.InactiveDays_InteractiveSignIn
+            $lastNonInteractive = "{0} ({1} days ago)" -f $item.LastNonInteractiveSignInDateTime, $item.InactiveDays_NonInteractiveSignIn
+
             $ReportingLoginDetails = [pscustomobject]@{
-                "Last successful log-in" = "$($item.lastSuccessfulSignInDateTime) ($($item.LastSignInDays) days ago)"
-                "Last interactive log-in attempt" = "$($item.LastInteractiveSignInDateTime) ($($item.InactiveDays_InteractiveSignIn) days ago)"
-                "Last non-interactive log-in" = "$($item.LastNonInteractiveSignInDateTime) ($($item.InactiveDays_NonInteractiveSignIn) days ago)"
-            }           
+                "Last successful log-in"         = $lastSuccessful
+                "Last interactive log-in attempt" = $lastInteractive
+                "Last non-interactive log-in"    = $lastNonInteractive
+            }
+
             [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
             [void]$DetailTxtBuilder.AppendLine("Login Details")
             [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine("Last successful log-in: $($item.lastSuccessfulSignInDateTime) ($($item.LastSignInDays) days ago)")
-            [void]$DetailTxtBuilder.AppendLine("Last interactive log-in attempt: $($item.LastInteractiveSignInDateTime) ($($item.InactiveDays_InteractiveSignIn) days ago)")
-            [void]$DetailTxtBuilder.AppendLine("Last non-interactive log-in: $($item.LastNonInteractiveSignInDateTime) ($($item.InactiveDays_NonInteractiveSignIn) days ago)")
+            [void]$DetailTxtBuilder.AppendLine("Last successful log-in: $lastSuccessful")
+            [void]$DetailTxtBuilder.AppendLine("Last interactive log-in attempt: $lastInteractive")
+            [void]$DetailTxtBuilder.AppendLine("Last non-interactive log-in: $lastNonInteractive")
             [void]$DetailTxtBuilder.AppendLine()
         }
 
@@ -1074,11 +1094,11 @@ function Invoke-CheckUsers {
         if (@($item.RolesDetails).count -ge 1) {
             $ReportingRoles = foreach ($role in $($item.RolesDetails)) {
                 [pscustomobject]@{ 
-                    "Role name" = $($role.DisplayName)
-                    "AssignmentType" = $($role.AssignmentType)
-                    "Tier Level" = $($role.RoleTier)
-                    "Privileged" = $($role.isPrivileged)
-                    "Builtin" = $($role.IsBuiltin)
+                    "Role name" = $role.DisplayName
+                    "AssignmentType" = $role.AssignmentType
+                    "Tier Level" = $role.RoleTier
+                    "Privileged" = $role.isPrivileged
+                    "Builtin" = $role.IsBuiltin
                     "Scoped to" = "$($role.ScopeResolved.DisplayName) ($($role.ScopeResolved.Type))"
                 }
             }
@@ -1090,28 +1110,47 @@ function Invoke-CheckUsers {
         }
 
         if (@($item.GroupOwnerDetails).count -ge 1) {
+
+            #Set lenght to 0
+            $maxDisplayNameLength = 0
+            $maxWarningsLength = 0
+
             $ReportingGroupOwner = foreach ($object in $($item.GroupOwnerDetails)) {
                 $MatchingGroup = $AllGroupsDetails[$($Object.id)]
+
+                #Calculate field size for displayname and warnings. This allow the reduce of whitespaces in combination with Format-ReportSection
+                $displayName = $MatchingGroup.DisplayName
+                $warnings = $MatchingGroup.Warnings
+                if ($null -ne $displayName -and $displayName.Length -gt $maxDisplayNameLength) {
+                    $maxDisplayNameLength = $displayName.Length
+                }
+                if ($null -ne $warnings -and $warnings.Length -gt $maxWarningsLength) {
+                    $maxWarningsLength = $warnings.Length
+                }
+
                 [pscustomobject]@{ 
-                    "AssignmentType" = $($object.AssignmentType)
-                    "DisplayName" = $($MatchingGroup.DisplayName)
-                    "DisplayNameLink" = "<a href=Groups_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.id)>$($MatchingGroup.DisplayName)</a>"
-                    "Type" = $($MatchingGroup.Type)
-                    "OnPrem" = $($MatchingGroup.OnPrem)
-                    "EntraRoles" = $($object.EntraRoles)
-                    "AzureRoles" = $($object.AzureRoles)
-                    "AppRoles" = $($object.AppRoles)
-                    "CAPs" = $($object.CAPs)
-                    "Users" = $($MatchingGroup.Users)
-                    "Impact" = $($object.Impact)
-                    "Warnings" = $($MatchingGroup.Warnings)
+                    "AssignmentType" = $object.AssignmentType
+                    "DisplayName" = $displayName
+                    "DisplayNameLink" = "<a href=Groups_$($StartTimestamp)_$($EscapedTenantName).html#$($object.id)>$($displayName)</a>"
+                    "Type" = $MatchingGroup.Type
+                    "OnPrem" = $MatchingGroup.OnPrem
+                    "EntraRoles" = $object.EntraRoles
+                    "AzureRoles" = $object.AzureRoles
+                    "AppRoles" = $object.AppRoles
+                    "CAPs" = $object.CAPs
+                    "Users" = $MatchingGroup.Users
+                    "Impact" = $object.Impact
+                    "Warnings" = $warnings
                 }
             }
 
-            [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine("Owner of Groups")
-            [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingGroupOwner | format-table -Property AssignmentType,DisplayName,Type,OnPrem,EntraRoles,AzureRoles,AppRoles,CAPs,Users,Impact,Warnings | Out-String))
+            $formattedText = Format-ReportSection -Title "Owner of Groups" `
+            -Objects $ReportingGroupOwner `
+            -Properties @("AssignmentType", "Displayname", "Type", "OnPrem", "EntraRoles", "AzureRoles", "AppRoles", "CAPs", "Users", "Impact", "Warnings") `
+            -ColumnWidths @{ AssignmentType = 15; Displayname = [Math]::Min($maxDisplayNameLength, 60); Type = 15; OnPrem = 7; EntraRoles = 10; AzureRoles = 10; AppRoles = 8; CAPs = 4; Users = 5; Impact = 6; Warnings = [Math]::Min($maxWarningsLength, 60) }
+            [void]$DetailTxtBuilder.AppendLine($formattedText)
+                    
+            
             $ReportingGroupOwner  = foreach ($obj in $ReportingGroupOwner) {
                 [pscustomobject]@{
                     AssignmentType          = $obj.AssignmentType
@@ -1132,11 +1171,11 @@ function Invoke-CheckUsers {
         if (@($item.AppRegOwnerDetails).count -ge 1) {
             $ReportingOwnerAppRegistration = foreach ($app in $($item.AppRegOwnerDetails)) {
                 [pscustomobject]@{ 
-                    "DisplayName" = $($app.DisplayName)
-                    "DisplayNameLink" = "<a href=AppRegistration_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($app.Id)>$($app.DisplayName)</a>"
-                    "SignInAudience" = $($app.SignInAudience)
-                    "AppRoles" = $($app.AppRoles)
-                    "Impact" = $($app.Impact)
+                    "DisplayName" = $app.DisplayName
+                    "DisplayNameLink" = "<a href=AppRegistration_$($StartTimestamp)_$($EscapedTenantName).html#$($app.Id)>$($app.DisplayName)</a>"
+                    "SignInAudience" = $app.SignInAudience
+                    "AppRoles" = $app.AppRoles
+                    "Impact" = $app.Impact
                 }            
             }
             #Sort based on the impact
@@ -1160,16 +1199,16 @@ function Invoke-CheckUsers {
         if (@($item.SPOwnerDetails).count -ge 1) {
             $ReportingOwnerSP  = foreach ($app in $($item.SPOwnerDetails)) {
                 [pscustomobject]@{ 
-                    "DisplayName" = $($app.DisplayName)
-                    "DisplayNameLink" = "<a href=EnterpriseApps_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($app.Id)>$($app.DisplayName)</a>"
-                    "AppLock" = $($app.AppLock)
-                    "GroupMembership" = $($app.GroupMembership)
-                    "GroupOwnership" = $($app.GroupOwnership)
-                    "AppOwnership" = $($app.AppOwnership)
-                    "EntraRoles" = $($app.EntraRoles)
-                    "AzureRoles" = $($app.GroupOwnership)
+                    "DisplayName" = $app.DisplayName
+                    "DisplayNameLink" = "<a href=EnterpriseApps_$($StartTimestamp)_$($EscapedTenantName).html#$($app.Id)>$($app.DisplayName)</a>"
+                    "AppLock" = $app.AppLock
+                    "GroupMembership" = $app.GroupMembership
+                    "GroupOwnership" = $app.GroupOwnership
+                    "AppOwnership" = $app.AppOwnership
+                    "EntraRoles" = $app.EntraRoles
+                    "AzureRoles" = $app.GroupOwnership
                     "APIPermission" = "D:$($app.ApiDangerous) / H:$($app.ApiHigh) / M:$($app.ApiMedium) / L:$($app.ApiLow) / U:$($app.ApiMisc)"
-                    "Warnings" = $($app.Warnings)
+                    "Warnings" = $app.Warnings
                 }
             }
             [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
@@ -1179,7 +1218,7 @@ function Invoke-CheckUsers {
             $ReportingOwnerSP  = foreach ($obj in $ReportingOwnerSP) {
                 [pscustomobject]@{
                     DisplayName             = $obj.DisplayNameLink
-                    AppLock             = $obj.AppLock
+                    AppLock                 = $obj.AppLock
                     GroupMembership         = $obj.GroupMembership
                     AppOwnership            = $obj.AppOwnership
                     EntraRoles              = $obj.EntraRoles
@@ -1192,42 +1231,78 @@ function Invoke-CheckUsers {
 
 
         if (@($item.DeviceOwnerDetails).count -ge 1) {
+
+            $DiplayNameLength = 0
+            $OsLength = 0
+
             $ReportingOwnerDevice = foreach ($object in $($item.DeviceOwnerDetails)) {
                 $DeviceDetails = $Devices[$object.id]
+
+                # Calc Max Length
+                $DiplayName = $userDetails.userPrincipalName
+                if ($null -ne $DisplayName -and $DisplayName.Length -gt $DiplayNameLength) {
+                    $DiplayNameLength = $DisplayName.Length
+                }
+                $Os = $DeviceDetails.operatingSystem + " / " + $DeviceDetails.operatingSystemVersion
+                if ($null -ne $Os -and $Os.Length -gt $OsLength) {
+                    $OsLength = $Os.Length
+                }
+
                 [pscustomobject]@{ 
-                    "Displayname" = $($DeviceDetails.displayName)
-                    "Type" = $($DeviceDetails.trustType)
-                    "OS" = "$($DeviceDetails.operatingSystem) / $($DeviceDetails.operatingSystemVersion)"
+                    "Displayname" = $DiplayName
+                    "Type" = $DeviceDetails.trustType
+                    "OS" = $Os
                 }
             }
-            [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine("Owner of Devices")
-            [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingOwnerDevice | Out-String))
+            
+            # Build TXT
+            $formattedText = Format-ReportSection -Title "Owner of Devices" `
+            -Objects $ReportingOwnerDevice `
+            -Properties @("Displayname", "Type", "OS") `
+            -ColumnWidths @{ Displayname = [Math]::Min($DiplayNameLength, 30); Type = 15; OS = [Math]::Min($OsLength, 40) }
+            [void]$DetailTxtBuilder.AppendLine($formattedText)
         }
 
         #Registered devices
         if (@($item.DeviceRegisteredDetails).count -ge 1) {
+
+            $DiplayNameLength = 0
+            $OsLength = 0
+
             $ReportingRegisteredDevice = foreach ($object in $($item.DeviceRegisteredDetails)) {
                 $DeviceDetails = $Devices[$object.id]
+
+                # Calc Max Length
+                $DiplayName = $userDetails.userPrincipalName
+                if ($null -ne $DisplayName -and $DisplayName.Length -gt $DiplayNameLength) {
+                    $DiplayNameLength = $DisplayName.Length
+                }
+                $Os = $DeviceDetails.operatingSystem + " / " + $DeviceDetails.operatingSystemVersion
+                if ($null -ne $Os -and $Os.Length -gt $OsLength) {
+                    $OsLength = $Os.Length
+                }
+
                 [pscustomobject]@{ 
-                    "Displayname" = $($DeviceDetails.displayName)
-                    "Type" = $($DeviceDetails.trustType)
-                    "OS" = "$($DeviceDetails.operatingSystem) / $($DeviceDetails.operatingSystemVersion)"
+                    "Displayname" = $DiplayName
+                    "Type" = $DeviceDetails.trustType
+                    "OS" = $OsLength
                 }
             }
-            [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine("Registered Devices")
-            [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingRegisteredDevice | Out-String))
+
+            # Build TXT
+            $formattedText = Format-ReportSection -Title "Registered Devices" `
+            -Objects $ReportingRegisteredDevice `
+            -Properties @("Displayname", "Type", "OS") `
+            -ColumnWidths @{ Displayname = [Math]::Min($DiplayNameLength, 30); Type = 15; OS = [Math]::Min($OsLength, 40) }
+            [void]$DetailTxtBuilder.AppendLine($formattedText)
         }   
 
         #AU Devices
         if (@($item.AUMemberDetails).count -ge 1) {       
             $ReportingAdminUnits = foreach ($Au in $($item.AUMemberDetails)) {
                 [pscustomobject]@{ 
-                    "AU Name" = $($Au.DisplayName)
-                    "isMemberManagementRestricted" = $($Au.isMemberManagementRestricted)
+                    "AU Name" = $Au.DisplayName
+                    "isMemberManagementRestricted" = $Au.isMemberManagementRestricted
                     
                 }
             }
@@ -1240,21 +1315,41 @@ function Invoke-CheckUsers {
 
         #Directly assigned AppRoles
         if ($item.AppRoles -ge 1) {
+
+            #Set lenght to 0
+            $maxAppRoleNameLength = 0
+            $maxDescriptionLength = 0
+            $maxAppNameLength = 0
            
             $ReportingAppRoles = foreach ($object in $($item.AppRolesDetails)) {
+
+                $AppRoleName = $object.AppRoleDisplayName
+                $Description = $object.AppRoleDescriptions
+                $AppName = $object.AppName
+                if ($null -ne $AppRoleName -and $AppRoleName.Length -gt $maxAppRoleNameLength) {
+                    $maxAppRoleNameLength = $AppRoleName.Length
+                }
+                if ($null -ne $Description -and $Description.Length -gt $maxDescriptionLength) {
+                    $maxDescriptionLength = $Description.Length
+                }
+                if ($null -ne $AppName -and $AppName.Length -gt $maxAppNameLength) {
+                    $maxAppNameLength = $AppName.Length
+                }
                 [pscustomobject]@{ 
-                    "AppRoleName" = $($object.AppRoleDisplayName)
-                    "Enabled" = $($object.AppRoleEnabled)
-                    "Description" = $($object.AppRoleDescription)
-                    "AssignedtoApp" = "<a href=EnterpriseApps_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.AppID)>$($object.AppName)</a>"
-                    "App" = "$($object.AppName)"
+                    "AppRoleName" = $AppRoleName
+                    "Enabled" = $object.AppRoleEnabled
+                    "Description" = $Description
+                    "AssignedtoApp" = "<a href=EnterpriseApps_$($StartTimestamp)_$($EscapedTenantName).html#$($object.AppID)>$($AppName)</a>"
+                    "App" = $AppName
                 }
             }
             
-            [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine("Directly Assigned AppRoles")
-            [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingAppRoles | format-table -Property AppRoleName,Enabled,Description,App | Out-String))
+            $formattedText = Format-ReportSection -Title "Directly Assigned AppRoles" `
+            -Objects $ReportingAppRoles `
+            -Properties @("AppRoleName", "Enabled", "Description", "App") `
+            -ColumnWidths @{ AppRoleName = [Math]::Min($maxDisplayNameLength, 40); Enabled = 7; Description = [Math]::Min($maxDisplayNameLength, 40); App = [Math]::Min($maxDisplayNameLength, 40)}
+            [void]$DetailTxtBuilder.AppendLine($formattedText)
+
             $ReportingAppRoles  = foreach ($obj in $ReportingAppRoles) {
                 [pscustomobject]@{
                     AppRoleName     = $obj.AppRoleName
@@ -1267,37 +1362,54 @@ function Invoke-CheckUsers {
 
         #Group Memberships
         if (@($item.UserMemberGroups).count -ge 1) {
-
+            $MatchingGroupRaw = [System.Collections.Generic.List[object]]::new()
             #Limit the number of groups if needed
             if ($LimitGroupMembers) {
                 $item.UserMemberGroups = $item.UserMemberGroups | select-object -First 10
             }
-            
-            $ReportingMemberGroup = foreach ($object in $($item.UserMemberGroups)) {
+
+            #Set lenght to 0
+            $maxDisplayNameLength = 0
+            $maxWarningsLength = 0
+
+            foreach ($object in $($item.UserMemberGroups)) {
                 $MatchingGroup = $AllGroupsDetails[$($Object.id)]
-                [pscustomobject]@{
-                    "AssignmentType" = $($object.AssignmentType)
-                    "DisplayName" = $($MatchingGroup.DisplayName)
-                    "DisplayNameLink" = "<a href=Groups_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.id)>$($MatchingGroup.DisplayName)</a>"
-                    "Type" = $($MatchingGroup.Type)
-                    "OnPrem" = $($MatchingGroup.OnPrem)
-                    "EntraRoles" = $($object.EntraRoles)
-                    "AzureRoles" = $($object.AzureRoles)
-                    "AppRoles" = $($object.AppRoles)
-                    "CAPs" = $($object.CAPs)
-                    "Users" = $($MatchingGroup.Users)
-                    "Impact" = $($object.Impact)
-                    "Warnings" = $($MatchingGroup.Warnings)
+                
+                #Calculate field size for displayname and warnings. This allow the reduce of whitespaces in combination with Format-ReportSection
+                $displayName = $MatchingGroup.DisplayName
+                $warnings = $MatchingGroup.Warnings
+                if ($null -ne $displayName -and $displayName.Length -gt $maxDisplayNameLength) {
+                    $maxDisplayNameLength = $displayName.Length
                 }
+                if ($null -ne $warnings -and $warnings.Length -gt $maxWarningsLength) {
+                    $maxWarningsLength = $warnings.Length
+                }
+
+                $obj = [pscustomobject]@{
+                    "AssignmentType" = $object.AssignmentType
+                    "DisplayName" = $displayName
+                    "DisplayNameLink" = "<a href=Groups_$($StartTimestamp)_$($EscapedTenantName).html#$($object.id)>$($displayName)</a>"
+                    "Type" = $MatchingGroup.Type
+                    "OnPrem" = $MatchingGroup.OnPrem
+                    "EntraRoles" = $object.EntraRoles
+                    "AzureRoles" = $object.AzureRoles
+                    "AppRoles" = $object.AppRoles
+                    "CAPs" = $object.CAPs
+                    "Users" = $MatchingGroup.Users
+                    "Impact" = $object.Impact
+                    "Warnings" = $warnings
+                }
+                [void]$MatchingGroupRaw.Add($obj)
             }
 
-           
-            [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine("Member of Groups")
-            [void]$DetailTxtBuilder.AppendLine("-----------------------------------------------------------------")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingMemberGroup | format-table -Property AssignmentType,DisplayName,Type,OnPrem,EntraRoles,AzureRoles,AppRoles,CAPs,Users,Impact,Warnings | Out-String))
-            $ReportingMemberGroup  = foreach ($obj in $ReportingMemberGroup) {
-                [pscustomobject]@{
+            $formattedText = Format-ReportSection -Title "Member of Groups" `
+            -Objects $MatchingGroupRaw `
+            -Properties @("AssignmentType", "Displayname", "Type", "OnPrem", "EntraRoles", "AzureRoles", "AppRoles", "CAPs", "Users", "Impact", "Warnings") `
+            -ColumnWidths @{ AssignmentType = 15; Displayname = [Math]::Min($maxDisplayNameLength, 60); Type = 15; OnPrem = 7; EntraRoles = 10; AzureRoles = 10; AppRoles = 8; CAPs = 4; Users = 5; Impact = 6; Warnings = [Math]::Min($maxWarningsLength, 60) }
+            [void]$DetailTxtBuilder.AppendLine($formattedText)
+        
+            foreach ($obj in $MatchingGroupRaw) {
+                $ReportingMemberGroup.Add([pscustomobject]@{
                     AssignmentType          = $obj.AssignmentType
                     DisplayName             = $obj.DisplayNameLink
                     Type                    = $obj.Type
@@ -1309,7 +1421,8 @@ function Invoke-CheckUsers {
                     Users                   = $obj.Users
                     Impact                  = $obj.Impact
                     Warnings                = $obj.Warnings
-                }
+                })
+
             }
         }
 
@@ -1317,12 +1430,12 @@ function Invoke-CheckUsers {
         if ($item.AzureRoles -ge 1 ) {
             $ReportingAzureRoles = foreach ($object in $($item.AzureRoleDetails)) {
                 [pscustomobject]@{ 
-                    "Role name" = $($object.RoleName)
-                    "Assignment" = $($object.AssignmentType)
-                    "RoleType" = $($object.RoleType)
-                    "Tier Level" = $($object.RoleTier)
-                    "Conditions" = $($object.Conditions)
-                    "Scoped to" = $($object.Scope)
+                    "Role name" = $object.RoleName
+                    "Assignment" = $object.AssignmentType
+                    "RoleType" = $object.RoleType
+                    "Tier Level" = $object.RoleTier
+                    "Conditions" = $object.Conditions
+                    "Scoped to" = $object.Scope
                 }
             }
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
