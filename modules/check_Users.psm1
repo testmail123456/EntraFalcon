@@ -985,7 +985,7 @@ function Invoke-CheckUsers {
 
     # Get the total count of group memberships. If this is to high the amount groups in the HTML report will be limited
     $TotalMemberGroups = $($AllUsersDetails.UserMemberGroups).count
-    if ($TotalMemberGroups -ge 20000) {
+    if ($TotalMemberGroups -ge 50000) {
         $LimitGroupMembers = $true
         $WarningReport.Add("GroupMembership: Only 10 groups are displayed to ensure HTML performance.")
     } else {
