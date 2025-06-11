@@ -1240,8 +1240,8 @@ Appendix: Network Location
     #Named location appendix
     If (($NamedLocations | Measure-Object).count -gt 0) {
         $AppendixTitle | Out-File -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
-        $NamedLocations | format-table Id,DisplayName,Trusted,Type,TargetedLocations,IncludedCAPs,ExcludedCAPs | Out-File -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
-        $AppendixNetworkLocations += $NamedLocations | ConvertTo-Html Id,DisplayName,Trusted,Type,TargetedLocations,@{Label="Included in CAPs"; Expression={$_.IncludedCAPsLinks}},@{Label="Excluded in CAPs"; Expression={$_.ExcludedCAPsLinks}} -Fragment -PreContent "<h2>Appendix: Network Location</h2>"
+        $NamedLocations | format-table Id,Name,Trusted,Type,TargetedLocations,IncludedCAPs,ExcludedCAPs | Out-File -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
+        $AppendixNetworkLocations += $NamedLocations | ConvertTo-Html Id,Name,Trusted,Type,TargetedLocations,@{Label="Included in CAPs"; Expression={$_.IncludedCAPsLinks}},@{Label="Excluded in CAPs"; Expression={$_.ExcludedCAPsLinks}} -Fragment -PreContent "<h2>Appendix: Network Location</h2>"
         #Remove the automated encoding
         $AppendixNetworkLocations  = $AppendixNetworkLocations -replace '&lt;', '<' -replace '&gt;', '>'
     }
