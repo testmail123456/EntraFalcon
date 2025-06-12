@@ -1316,7 +1316,7 @@ function Invoke-CheckEnterpriseApps {
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
             [void]$DetailTxtBuilder.AppendLine("Owner of Groups")
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingGroupOwner | Format-Table DisplayName,SecurityEnabled,RoleAssignable,ActiveRoles,ActivePrivilegedRoles,AzureRoles,CAPs,ImpactOrg,Warnings | Out-String))
+            [void]$DetailTxtBuilder.AppendLine(($ReportingGroupOwner | Format-Table DisplayName,SecurityEnabled,RoleAssignable,ActiveRoles,ActivePrivilegedRoles,AzureRoles,CAPs,ImpactOrg,Warnings -AutoSize | Out-String -Width 200))
             $ReportingGroupOwner  = foreach ($obj in $ReportingGroupOwner) {
                 [pscustomobject]@{
                     DisplayName             = $obj.DisplayNameLink

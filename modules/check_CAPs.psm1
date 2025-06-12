@@ -1054,7 +1054,7 @@ $MissingPolicies
             $ReportingCapInfo | Add-Member -NotePropertyName Warnings -NotePropertyValue $matchingWarnings
         }
        
-        [void]$DetailTxtBuilder.AppendLine(($ReportingCapInfo | format-table | Out-String))
+        [void]$DetailTxtBuilder.AppendLine(($ReportingCapInfo | Out-String))
 
 
         ############### Missing Roles
