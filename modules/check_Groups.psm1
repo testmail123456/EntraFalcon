@@ -20,6 +20,7 @@ function Invoke-CheckGroups {
         [Parameter(Mandatory=$false)][hashtable]$AzureIAMAssignments,
         [Parameter(Mandatory=$true)][hashtable]$TenantRoleAssignments,
         [Parameter(Mandatory=$true)][hashtable]$Devices,
+        [Parameter(Mandatory=$true)][hashtable]$AllUsersBasicHT,
         [Parameter(Mandatory=$true)][String[]]$StartTimestamp,
         [Parameter(Mandatory=$false)][Object[]]$TenantPimForGroupsAssignments
     )
@@ -185,41 +186,7 @@ function Invoke-CheckGroups {
         return $allNestedGroups
     }
   
-    # Function to help built the TXT report (avoiding using slow stuff like format-table)
-    function Format-ReportSection {
-        param (
-            [string]$Title,
-            [array]$Objects,
-            [string[]]$Properties,
-            [hashtable]$ColumnWidths
-        )
-    
-        $sb = New-Object System.Text.StringBuilder
-    
-        $line = "=" * 120
-        [void]$sb.AppendLine($line)
-        [void]$sb.AppendLine($Title)
-        [void]$sb.AppendLine($line)
-    
-        # Header
-        $header = ""
-        foreach ($prop in $Properties) {
-            $header += ("{0,-$($ColumnWidths[$prop])} " -f $prop)
-        }
-        [void]$sb.AppendLine($header)
-    
-        # Rows
-        foreach ($obj in $Objects) {
-            $row = ""
-            foreach ($prop in $Properties) {
-                $val = $obj.$prop
-                $row += ("{0,-$($ColumnWidths[$prop])} " -f $val)
-            }
-            [void]$sb.AppendLine($row)
-        }
-    
-        return $sb.ToString()
-    }
+
           
 
     ############################## Script section ########################
@@ -240,7 +207,8 @@ function Invoke-CheckGroups {
     $NestedGroupsHighvalue = [System.Collections.Generic.List[object]]::new()
 	$AllGroupsDetails = [System.Collections.Generic.List[object]]::new()
     $AllObjectDetailsHTML = [System.Collections.ArrayList]::new()
-    $DetailOutputTxt = ""
+    $EscapedTenantName = [System.Uri]::EscapeDataString($CurrentTenant.DisplayName)
+
     if (-not $GLOBALGraphExtendedChecks) {$GroupScriptWarningList.Add("Only active role assignments assessed!")}
 
     $GroupImpactScore = @{
@@ -602,17 +570,6 @@ function Invoke-CheckGroups {
 
     Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Got $($GroupNestedInRaw.Count) groups with parent group relationship"
 
-
-    #Basic User Info to avoid storing the information in a large object
-    $QueryParameters = @{
-        '$select' = "Id,UserPrincipalName,UserType,accountEnabled,onPremisesSyncEnabled"
-        '$top' = "999"
-      }
-      $RawResponse = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/users" -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)
-    $AllUsersBasicHT = @{}
-    foreach ($user in $RawResponse) {
-        $AllUsersBasicHT[$user.id] = $user
-    }
 
     #Basic ServicePrincipal Info to avoid storing the information in a large object
     $QueryParameters = @{
@@ -1547,7 +1504,24 @@ function Invoke-CheckGroups {
     $detailsCount = $details.count
     $StatusUpdateInterval = [Math]::Max([Math]::Floor($detailsCount / 10), 1)
     Write-LogVerbose -CallerPSCmdlet $PSCmdlet -Message "Status: Processing group 1 of $detailsCount (updates every $StatusUpdateInterval groups)..."
-    $ProgressCounter = 0    
+    $ProgressCounter = 0
+
+    $DetailTxtBuffer = [System.Text.StringBuilder]::new()
+    $BufferThreshold = 5000
+    $BufferedCount = 0
+    $DetailReportPath = "$OutputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt"
+
+#Define header
+$headerTXT = "************************************************************************************************************************
+$Title Enumeration
+Executed in Tenant: $($CurrentTenant.DisplayName) / ID: $($CurrentTenant.id)
+Executed at: $StartTimestamp
+Execution Warnings = $($GroupScriptWarningList  -join ' / ')
+************************************************************************************************************************
+"
+
+$tableOutput | Format-table DisplayName,type,SecurityEnabled,RoleAssignable,OnPrem,Dynamic,Visibility,Protected,PIM,AuUnits,DirectOwners,NestedOwners,OwnersSynced,Users,Guests,SPCount,Devices,NestedGroups,NestedInGroups,AppRoles,CAPs,EntraRoles,AzureRoles,Impact,Likelihood,Risk,Warnings | Out-File -Width 512 "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
+
 
     foreach ($item in $details) {
 
@@ -1578,13 +1552,13 @@ function Invoke-CheckGroups {
 
         ############### HEADER
         $ReportingGroupInfo = [pscustomobject]@{
-            "Group Name" = $($item.DisplayName)
-            "Group ObjectID" = $($item.Id)
-            "Type" = $($item.Type)
-            "SecurityEnabled" = $($item.SecurityEnabled)
-            "Protected" = $($item.Protected)
-            "Synced from on-prem" = $($item.OnPrem)
-            "RiskScore" = $($item.Risk)
+            "Group Name" = $item.DisplayName
+            "Group ObjectID" = $item.Id
+            "Type" = $item.Type
+            "SecurityEnabled" = $item.SecurityEnabled
+            "Protected" = $item.Protected
+            "Synced from on-prem" = $item.OnPrem
+            "RiskScore" = $item.Risk
         }
         if ($item.Dynamic) {
             $ReportingGroupInfo | Add-Member -NotePropertyName DynamicRule -NotePropertyValue $item.MembershipRule
@@ -1594,7 +1568,21 @@ function Invoke-CheckGroups {
             $ReportingGroupInfo | Add-Member -NotePropertyName Warnings -NotePropertyValue $item.Warnings
         }
 
-        [void]$DetailTxtBuilder.AppendLine(($ReportingGroupInfo | Out-String))
+        foreach ($prop in $ReportingGroupInfo.PSObject.Properties) {
+            $name = if ($null -ne $prop.Name) { $prop.Name } else { "Unknown" }
+
+            # Safely convert any value type to string
+            if ($null -eq $prop.Value) {
+                $value = ""
+            } elseif ($prop.Value -is [System.Array]) {
+                $value = ($prop.Value -join ', ')
+            } else {
+                $value = $prop.Value.ToString()
+            }
+
+            [void]$DetailTxtBuilder.AppendLine("$name : $value")
+        }
+        [void]$DetailTxtBuilder.AppendLine("")
         
         ############### Administrative Units
         if (@($item.AuUnitsDetails).Count -ge 1) {
@@ -1627,7 +1615,7 @@ function Invoke-CheckGroups {
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
             [void]$DetailTxtBuilder.AppendLine("Entra Role Assignments")
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingRoles | Out-String))
+            [void]$DetailTxtBuilder.AppendLine(($ReportingRoles | format-table | Out-String))
         }
 
         ############### Azure Roles
@@ -1646,16 +1634,24 @@ function Invoke-CheckGroups {
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
             [void]$DetailTxtBuilder.AppendLine("Azure IAM assignments")
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingAzureRoles | Out-String))
+            [void]$DetailTxtBuilder.AppendLine(($ReportingAzureRoles | format-table | Out-String))
         }        
 
         ############### CAPs
-        if (@($item.GroupCAPsDetails).Count -ge 1) {
+        if ($item.GroupCAPsDetails.Count -ge 1) {
+
             $ReportingCAPsRaw = [System.Collections.Generic.List[object]]::new()
-        
+            
+            $CapNameLength = 0
             foreach ($object in $item.GroupCAPsDetails) {
+                # Calc Max Length
+                $CapName = $object.CAPName
+                if ($null -ne $CapName -and $CapName.Length -gt $CapNameLength) {
+                    $CapNameLength = $CapName.Length
+                }
+
                 $txtObj = [pscustomobject]@{
-                    CAPName     = $object.CAPName
+                    CAPName     = $CapName
                     Usage       = $object.CAPExOrIn
                     Status      = $object.CAPStatus
                 }
@@ -1663,7 +1659,7 @@ function Invoke-CheckGroups {
                 [void]$ReportingCAPsRaw.Add($txtObj)
         
                 [void]$ReportingCAPs.Add([pscustomobject]@{
-                    CAPName = "<a href=ConditionalAccessPolicies_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.Id)>$($object.CAPName)</a>"
+                    CAPName = "<a href=ConditionalAccessPolicies_$($StartTimestamp)_$($EscapedTenantName).html#$($object.Id)>$($CapName)</a>"
                     Usage   = $object.CAPExOrIn
                     Status  = $object.CAPStatus
                 })
@@ -1672,7 +1668,7 @@ function Invoke-CheckGroups {
             $formattedText = Format-ReportSection -Title "Linked Conditional Access Policies" `
             -Objects $ReportingCAPsRaw `
             -Properties @("CAPName", "Usage", "Status") `
-            -ColumnWidths @{ CAPName = 50; Usage = 9; Status = 8}
+            -ColumnWidths @{ CAPName = [Math]::Min($CapNameLength, 120); Usage = 9; Status = 8}
         
             [void]$DetailTxtBuilder.AppendLine($formattedText)
         }
@@ -1680,11 +1676,19 @@ function Invoke-CheckGroups {
         ############### App Roles
         if (@($item.AppRolesDetails).Count -ge 1) {
             $AppRolesRaw = [System.Collections.Generic.List[object]]::new()
-        
+
+            $ResourceDisplayNameLength = 0
             foreach ($object in $item.AppRolesDetails) {
+
+                # Calc Max Length
+                $ResourceDisplayName = $object.ResourceDisplayName
+                if ($null -ne $ResourceDisplayName -and $ResourceDisplayName.Length -gt $ResourceDisplayNameLength) {
+                    $ResourceDisplayNameLength = $ResourceDisplayName.Length
+                }
+
                 $appObj = [pscustomobject]@{ 
-                    UsedIn     = $object.ResourceDisplayName
-                    UsedInLink = "<a href=EnterpriseApps_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.ResourceId)>$($object.ResourceDisplayName)</a>"
+                    UsedIn     = $ResourceDisplayName
+                    UsedInLink = "<a href=EnterpriseApps_$($StartTimestamp)_$($EscapedTenantName).html#$($object.ResourceId)>$($ResourceDisplayName)</a>"
                     AppRoleId  = $object.AppRoleId
                 }
                 [void]$AppRolesRaw.Add($appObj)
@@ -1694,7 +1698,7 @@ function Invoke-CheckGroups {
             $formattedText = Format-ReportSection -Title "App Roles" `
             -Objects $AppRolesRaw `
             -Properties @("UsedIn", "AppRoleId") `
-            -ColumnWidths @{ UsedIn = 40; AppRoleId = 40 }
+            -ColumnWidths @{ UsedIn = [Math]::Min($ResourceDisplayNameLength, 50); AppRoleId = 40 }
         
             [void]$DetailTxtBuilder.AppendLine($formattedText)
         
@@ -1711,16 +1715,24 @@ function Invoke-CheckGroups {
         if (@($item.OwnerUserDetails).Count -ge 1) {
             # Initialize list for raw user data
             $OwnerUserRaw = [System.Collections.Generic.List[object]]::new()
+
+            $UsernameLength = 0
         
             foreach ($object in $item.OwnerUserDetails) {
                 $userDetails = $AllUsersBasicHT[$object.id]
                 if (-not $userDetails.onPremisesSyncEnabled) { $userDetails.onPremisesSyncEnabled = "False" }
 
+                # Calc Max Length
+                $Username = $userDetails.userPrincipalName
+                if ($null -ne $Username -and $Username.Length -gt $UsernameLength) {
+                    $UsernameLength = $Username.Length
+                }
+
                 # Add raw user data to the list
                 $userObj = [pscustomobject]@{ 
                     "AssignmentType" = $object.AssignmentType
-                    "Username" = $userDetails.userPrincipalName
-                    "UsernameLink" = "<a href=Users_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($userDetails.id)>$($userDetails.userPrincipalName)</a>"
+                    "Username" = $Username
+                    "UsernameLink" = "<a href=Users_$($StartTimestamp)_$($EscapedTenantName).html#$($userDetails.id)>$($Username)</a>"
                     "Enabled" = $userDetails.accountEnabled
                     "Type" = $userDetails.userType
                     "Synced" = $userDetails.onPremisesSyncEnabled
@@ -1730,10 +1742,10 @@ function Invoke-CheckGroups {
             }
 
             # Output for TXT report
-            $formattedText = Format-ReportSection -Title "Nested Members: Users" `
+            $formattedText = Format-ReportSection -Title "Owners (User)" `
             -Objects $OwnerUserRaw `
             -Properties @("AssignmentType", "Username", "Enabled", "Type", "Synced") `
-            -ColumnWidths @{ AssignmentType = 14; Username = 50; Enabled = 7; Type = 7; Synced = 6}
+            -ColumnWidths @{ AssignmentType = 14; Username = [Math]::Min($UsernameLength, 60); Enabled = 7; Type = 7; Synced = 6}
         
             [void]$DetailTxtBuilder.AppendLine($formattedText)
 
@@ -1759,14 +1771,23 @@ function Invoke-CheckGroups {
         if (@($item.OwnerGroupDetails).count -ge 1) {
             $OwnerGroupsRaw = [System.Collections.Generic.List[object]]::new()
 
+            $GroupNameLength = 0
+
             foreach ($object in $item.OwnerGroupDetails) {
-                $groupDetails = $AllGroupsHT[$object.id]           
+                $groupDetails = $AllGroupsHT[$object.id]
+
+                # Calc Max Length
+                $GroupName = $groupDetails.displayName
+                if ($null -ne $GroupName -and $GroupName.Length -gt $GroupNameLength) {
+                    $GroupNameLength = $GroupName.Length
+                }
+
                 $groupObj = [pscustomobject]@{ 
-                    "AssignmentType" = $($object.AssignmentType)
-                    "Displayname" = $($groupDetails.displayName)
-                    "DisplayNameLink" = "<a href=#$($object.id)>$($groupDetails.displayName)</a>"
-                    "SecurityEnabled" = $($groupDetails.SecurityEnabled)
-                    "IsAssignableToRole" = $($groupDetails.IsAssignableToRole)
+                    "AssignmentType" = $object.AssignmentType
+                    "Displayname" = $GroupName
+                    "DisplayNameLink" = "<a href=#$($object.id)>$($GroupName)</a>"
+                    "SecurityEnabled" = $groupDetails.SecurityEnabled
+                    "IsAssignableToRole" = $groupDetails.IsAssignableToRole
                 }
                 [void]$OwnerGroupsRaw.Add($groupObj)
             }
@@ -1775,7 +1796,7 @@ function Invoke-CheckGroups {
             $formattedText = Format-ReportSection -Title "Eligible Owners (Groups)" `
             -Objects $OwnerGroupsRaw `
             -Properties @("AssignmentType", "Displayname", "SecurityEnabled", "IsAssignableToRole") `
-            -ColumnWidths @{ AssignmentType = 15; Displayname = 60; SecurityEnabled = 16; IsAssignableToRole = 19 }
+            -ColumnWidths @{ AssignmentType = 15; Displayname = [Math]::Min($GroupNameLength, 60); SecurityEnabled = 16; IsAssignableToRole = 19 }
             [void]$DetailTxtBuilder.AppendLine($formattedText)
 
             #Rebuild for HTML report
@@ -1792,11 +1813,20 @@ function Invoke-CheckGroups {
         ############### Owners (SP)
         if (@($item.ownerSpDetails).Count -ge 1) {
             $OwnerSPRaw = [System.Collections.Generic.List[object]]::new()
+
+            $DisplayNameLength = 0
         
             foreach ($object in $item.ownerSpDetails) {
+
+                # Calc Max Length
+                $DisplayName = $object.displayName
+                if ($null -ne $DisplayName -and $DisplayName.Length -gt $DisplayNameLength) {
+                    $DisplayNameLength = $DisplayName.Length
+                }                
+
                 $ownerObj = [pscustomobject]@{ 
-                    DisplayName     = $object.displayName
-                    DisplayNameLink = "<a href=EnterpriseApps_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.id)>$($object.displayName)</a>"
+                    DisplayName     = $DisplayName
+                    DisplayNameLink = "<a href=EnterpriseApps_$($StartTimestamp)_$($EscapedTenantName).html#$($object.id)>$($DisplayName)</a>"
                     Type            = $object.SPType
                     Org             = $object.publisherName
                     Foreign         = $object.Foreign
@@ -1809,7 +1839,7 @@ function Invoke-CheckGroups {
             $formattedText = Format-ReportSection -Title "Direct Owners (Service Principals" `
             -Objects $OwnerSPRaw `
             -Properties @("DisplayName", "Type", "Org", "Foreign", "DefaultMS") `
-            -ColumnWidths @{ DisplayName = 45; Type = 20; Org = 45; Foreign = 8; DefaultMS = 10 }
+            -ColumnWidths @{ DisplayName = [Math]::Min($DisplayNameLength, 45); Type = 20; Org = 45; Foreign = 8; DefaultMS = 10 }
             [void]$DetailTxtBuilder.AppendLine($formattedText)
         
             # Rebuild for HTML report
@@ -1827,17 +1857,26 @@ function Invoke-CheckGroups {
         ############### Nested Owners (Users)
         if (@($item.NestedOwnerUserDetails).count -ge 1) {
             $NestedOwnerUserHtml = [System.Collections.Generic.List[object]]::new()
+
+            $UsernameLength = 0
+
             foreach ($object in $($item.NestedOwnerUserDetails)) {
                 $userDetails = $AllUsersBasicHT[$object.id]
-                  if (-not $userDetails.onPremisesSyncEnabled) { $userDetails.onPremisesSyncEnabled = "False" }
+                if (-not $userDetails.onPremisesSyncEnabled) { $userDetails.onPremisesSyncEnabled = "False" }
+
+                # Calc Max Length
+                $Username = $userDetails.userPrincipalName
+                if ($null -ne $Username -and $Username.Length -gt $UsernameLength) {
+                    $UsernameLength = $Username.Length
+                }
 
                 $userObj = [pscustomobject]@{ 
-                    "AssignmentType" = $($object.AssignmentType)
-                    "Username" = $($userDetails.userPrincipalName)
-                    "UsernameLink" = "<a href=Users_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($userDetails.id)>$($userDetails.userPrincipalName)</a>"
-                    "Enabled" = $($userDetails.accountEnabled)
-                    "Type" = $($userDetails.userType)
-                    "Synced" = $($userDetails.onPremisesSyncEnabled)
+                    "AssignmentType" = $object.AssignmentType
+                    "Username" = $Username
+                    "UsernameLink" = "<a href=Users_$($StartTimestamp)_$($EscapedTenantName).html#$($userDetails.id)>$($Username)</a>"
+                    "Enabled" = $userDetails.accountEnabled
+                    "Type" = $userDetails.userType
+                    "Synced" = $userDetails.onPremisesSyncEnabled
                 }
 
                 [void]$NestedOwnerUser.Add($userObj)
@@ -1853,10 +1892,10 @@ function Invoke-CheckGroups {
             }
 
             # Build TXT report
-            $formattedText = Format-ReportSection -Title "Nested Members: Users" `
+            $formattedText = Format-ReportSection -Title "Nested Owners (Users)" `
             -Objects $NestedOwnerUser `
             -Properties @("AssignmentType", "Username", "Enabled", "Type", "Synced") `
-            -ColumnWidths @{ AssignmentType = 14; Username = 50; Enabled = 7; Type = 7; Synced = 6}
+            -ColumnWidths @{ AssignmentType = 14; Username = [Math]::Min($UsernameLength, 60); Enabled = 7; Type = 7; Synced = 6}
         
             [void]$DetailTxtBuilder.AppendLine($formattedText)
 
@@ -1947,18 +1986,27 @@ function Invoke-CheckGroups {
         if (@($item.UserDetails).Count -ge 1) {
             $ObjectCounter = 0
             $NestedUsersTXT = [System.Collections.Generic.List[object]]::new()
+
+            #Set lenght to 0
+            $UsernameLength = 0
         
             foreach ($object in $item.UserDetails) {
                 $userDetails = $AllUsersBasicHT[$object.id]
         
-                   if (-not $userDetails.onPremisesSyncEnabled) { $userDetails.onPremisesSyncEnabled = "False" }
-        
-                $linkedUsername = "<a href=Users_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($userDetails.id)>$($userDetails.userPrincipalName)</a>"
+                if (-not $userDetails.onPremisesSyncEnabled) { $userDetails.onPremisesSyncEnabled = "False" }
+
+                # Calc Max Length
+                $Username = $userDetails.userPrincipalName
+                if ($null -ne $Username -and $Username.Length -gt $UsernameLength) {
+                    $UsernameLength = $Username.Length
+                }
+
+                $linkedUsername = "<a href=Users_$($StartTimestamp)_$($EscapedTenantName).html#$($userDetails.id)>$($Username)</a>"
         
                 # Plain for TXT
                 $txtObj = [pscustomobject]@{ 
                     AssignmentType  = $object.AssignmentType
-                    Username        = $userDetails.userPrincipalName
+                    Username        = $Username
                     Enabled         = $userDetails.accountEnabled
                     Type            = $userDetails.userType
                     Synced          = $userDetails.onPremisesSyncEnabled
@@ -1992,7 +2040,7 @@ function Invoke-CheckGroups {
             $formattedText = Format-ReportSection -Title "Nested Members: Users" `
             -Objects $NestedUsersTXT `
             -Properties @("AssignmentType", "Username", "Enabled", "Type", "Synced") `
-            -ColumnWidths @{ AssignmentType = 14; Username = 50; Enabled = 7; Type = 7; Synced = 6}
+            -ColumnWidths @{ AssignmentType = 14; Username = [Math]::Min($UsernameLength, 60); Enabled = 7; Type = 7; Synced = 6}
         
             [void]$DetailTxtBuilder.AppendLine($formattedText)
             
@@ -2001,18 +2049,27 @@ function Invoke-CheckGroups {
         ############### Nested SP
         if (@($item.MemberSpDetails).Count -ge 1) {
             $NestedSPRaw = [System.Collections.Generic.List[object]]::new()
+
+            $DisplayNameLength = 0
         
             foreach ($object in $item.MemberSpDetails) {
+
+                # Calc Max Length
+                $DisplayName = $object.displayName
+                if ($null -ne $DisplayName -and $DisplayName.Length -gt $DisplayNameLength) {
+                    $DisplayNameLength = $DisplayName.Length
+                }
+
                 if ($object.SPType -eq "Application") {
-                    $DisplayNameLink = "<a href=EnterpriseApps_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.id)>$($object.displayName)</a>"
+                    $DisplayNameLink = "<a href=EnterpriseApps_$($StartTimestamp)_$($EscapedTenantName).html#$($object.id)>$($DisplayName)</a>"
                     $org = $object.publisherName
                 } else {
-                    $DisplayNameLink = "<a href=ManagedIdentities_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.id)>$($object.displayName)</a>"
+                    $DisplayNameLink = "<a href=ManagedIdentities_$($StartTimestamp)_$($EscapedTenantName).html#$($object.id)>$($DisplayName)</a>"
                     $org = "-"
                 }
         
                 $rawObj = [pscustomobject]@{
-                    DisplayName     = $object.displayName
+                    DisplayName     = $DisplayName
                     DisplayNameLink = $DisplayNameLink
                     Type            = $object.SPType
                     Org             = $org
@@ -2027,7 +2084,7 @@ function Invoke-CheckGroups {
             $formattedText = Format-ReportSection -Title "Nested Members: Service Principals" `
             -Objects $NestedSPRaw `
             -Properties @("DisplayName", "Type", "Org", "Foreign", "DefaultMS") `
-            -ColumnWidths @{ DisplayName = 45; Type = 20; Org = 45; Foreign = 8; DefaultMS = 10 }
+            -ColumnWidths @{ DisplayName = [Math]::Min($DisplayNameLength, 55); Type = 20; Org = 45; Foreign = 8; DefaultMS = 10 }
             [void]$DetailTxtBuilder.AppendLine($formattedText)
 
         
@@ -2045,13 +2102,27 @@ function Invoke-CheckGroups {
         ############### Nested Devices
         if (@($item.DevicesDetails).count -ge 1) {
             $NestedDevicesRaw = [System.Collections.Generic.List[object]]::new()
+
+            $DiplayNameLength = 0
+            $OsLength = 0
+
             foreach ($object in $item.DevicesDetails) {
                 $DeviceDetails = $Devices[$object.id]
-        
+
+                # Calc Max Length
+                $DiplayName = $userDetails.userPrincipalName
+                if ($null -ne $DisplayName -and $DisplayName.Length -gt $DiplayNameLength) {
+                    $DiplayNameLength = $DisplayName.Length
+                }
+                $Os = $DeviceDetails.operatingSystem + " / " + $DeviceDetails.operatingSystemVersion
+                if ($null -ne $Os -and $Os.Length -gt $OsLength) {
+                    $OsLength = $Os.Length
+                }
+                
                 $rawObj = [pscustomobject]@{
-                    Displayname   = $DeviceDetails.displayName
+                    Displayname   = $DiplayName
                     Type          = $DeviceDetails.trustType
-                    OS            = "$($DeviceDetails.operatingSystem) / $($DeviceDetails.operatingSystemVersion)"
+                    OS            = $Os
                 }
         
                 [void]$NestedDevicesRaw.Add($rawObj)
@@ -2060,8 +2131,8 @@ function Invoke-CheckGroups {
             # Build TXT
             $formattedText = Format-ReportSection -Title "Nested Members: Devices" `
             -Objects $NestedDevicesRaw `
-            -Properties @("Displayname", "Enabled", "Type", "Manufacturer", "OS") `
-            -ColumnWidths @{ Displayname = 30; Enabled = 8; Type = 15; Manufacturer = 26; OS = 40 }
+            -Properties @("Displayname", "Enabled", "Type", "OS") `
+            -ColumnWidths @{ Displayname = [Math]::Min($DiplayNameLength, 30); Enabled = 8; Type = 15; OS = [Math]::Min($OsLength, 40) }
             [void]$DetailTxtBuilder.AppendLine($formattedText)
             
             # Limit HTML output
@@ -2093,13 +2164,21 @@ function Invoke-CheckGroups {
         if (@($item.NestedInGroupsDetails).count -ge 1) {
             $NestedInGroupsRaw = [System.Collections.Generic.List[object]]::new()
 
+            $GroupNameLength = 0
+
             foreach ($object in $item.NestedInGroupsDetails) {
                 $groupDetails = $AllGroupsHT[$object.id]
+
+                # Calc Max Length
+                $GroupName = $groupDetails.displayName
+                if ($null -ne $GroupName -and $GroupName.Length -gt $GroupNameLength) {
+                    $GroupNameLength = $GroupName.Length
+                }
         
                 $rawObj = [pscustomobject]@{
                     AssignmentType     = $object.AssignmentType
-                    Displayname        = $groupDetails.DisplayName
-                    DisplayNameLink    = "<a href=#$($object.id)>$($groupDetails.displayName)</a>"
+                    Displayname        = $GroupName
+                    DisplayNameLink    = "<a href=#$($object.id)>$($GroupName)</a>"
                     SecurityEnabled    = $groupDetails.SecurityEnabled
                     IsAssignableToRole = $groupDetails.IsAssignableToRole
                     EntraRoles         = $object.EntraRoles
@@ -2114,7 +2193,7 @@ function Invoke-CheckGroups {
             $formattedText = Format-ReportSection -Title "Member Of: Nested in Groups (Transitive)" `
             -Objects $NestedInGroupsRaw `
             -Properties @("AssignmentType", "Displayname", "SecurityEnabled", "IsAssignableToRole", "EntraRoles", "AzureRoles", "CAPs") `
-            -ColumnWidths @{ AssignmentType = 15; Displayname = 45; SecurityEnabled = 16; IsAssignableToRole = 19; EntraRoles = 11; AzureRoles = 11; CAPs = 4 }
+            -ColumnWidths @{ AssignmentType = 15; Displayname = [Math]::Min($GroupNameLength, 60); SecurityEnabled = 16; IsAssignableToRole = 19; EntraRoles = 11; AzureRoles = 11; CAPs = 4 }
             [void]$DetailTxtBuilder.AppendLine($formattedText)
         
             # Sort only for HTML
@@ -2159,11 +2238,20 @@ function Invoke-CheckGroups {
         ############### Owns another Group (Pim for Groups)
         if (@($item.PfGOwnedGroupsDetails).Count -ge 1) {
             $OwnedGroupsRaw = [System.Collections.Generic.List[object]]::new()
+
+            $GroupNameLength = 0
+
             foreach ($object in $item.PfGOwnedGroupsDetails) {
+
+                $GroupName = $object.displayName
+                if ($null -ne $GroupName -and $GroupName.Length -gt $GroupNameLength) {
+                    $GroupNameLength = $GroupName.Length
+                }
+
                 [void]$OwnedGroupsRaw.Add([pscustomobject]@{ 
                     AssignmentType      = $object.AssignmentType
-                    Displayname         = $object.displayName
-                    DisplayNameLink     = "<a href=#$($object.id)>$($object.displayName)</a>"
+                    Displayname         = $GroupName
+                    DisplayNameLink     = "<a href=#$($object.id)>$($GroupName)</a>"
                     SecurityEnabled     = $object.SecurityEnabled
                     IsAssignableToRole  = $object.IsAssignableToRole
                     EntraRoles          = $object.EntraRoles
@@ -2175,7 +2263,7 @@ function Invoke-CheckGroups {
             $formattedText = Format-ReportSection -Title "Owned Groups (PIM for Groups)" `
             -Objects $OwnedGroupsRaw `
             -Properties @("AssignmentType", "Displayname", "SecurityEnabled", "IsAssignableToRole", "EntraRoles", "AzureRoles", "CAPs") `
-            -ColumnWidths @{ AssignmentType = 15; Displayname = 60; SecurityEnabled = 16; IsAssignableToRole = 19; EntraRoles = 11; AzureRoles = 11; CAPs = 4 }
+            -ColumnWidths @{ AssignmentType = 15; Displayname = [Math]::Min($GroupNameLength, 60); SecurityEnabled = 16; IsAssignableToRole = 19; EntraRoles = 11; AzureRoles = 11; CAPs = 4 }
         
             [void]$DetailTxtBuilder.AppendLine($formattedText)
             
@@ -2218,10 +2306,25 @@ function Invoke-CheckGroups {
     
         [void]$AllObjectDetailsHTML.Add($ObjectDetails)
 
+        #Write TXT report chunk
+        if (-not $SkipTxtReport) {
+            [void]$DetailTxtBuffer.AppendLine($DetailTxtBuilder.ToString())
+            $DetailTxtBuilder.Clear() > $null
+            $BufferedCount++
+
+            if ($BufferedCount -ge $BufferThreshold) {
+                $DetailTxtBuffer.ToString() | Out-File -Width 512 -Append -FilePath $DetailReportPath
+                $DetailTxtBuffer.Clear() > $null
+                $BufferedCount = 0
+            }
+        }
+
     }
 
-    $DetailOutputTxt = $DetailTxtBuilder.ToString()
-
+    # Flush remaining buffered content after loop
+    if (-not $SkipTxtReport -and $BufferedCount -gt 0) {
+        $DetailTxtBuffer.ToString() | Out-File -Width 512 -Append -FilePath $DetailReportPath
+    }
 
     write-host "[*] Writing Reports"
     write-host ""
@@ -2246,15 +2349,6 @@ $ObjectsDetailsHEAD = @'
 $AllObjectDetailsHTML = $ObjectsDetailsHEAD + "`n" + $AllObjectDetailsHTML + "`n" + '</script>'
 
 
-#Define header
-$headerTXT = "************************************************************************************************************************
-$Title Enumeration
-Executed in Tenant: $($CurrentTenant.DisplayName) / ID: $($CurrentTenant.id)
-Executed at: $StartTimestamp
-Execution Warnings = $($GroupScriptWarningList  -join ' / ')
-************************************************************************************************************************
-"
-
     #Define Appendix
 $AppendixTitle = "
 
@@ -2275,9 +2369,7 @@ Appendix: Dynamic Groups
 
     #Write TXT and CSV files
     $headerTXT | Out-File -Width 512 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
-    $tableOutput  |  Format-table DisplayName,type,SecurityEnabled,RoleAssignable,OnPrem,Dynamic,Visibility,Protected,PIM,AuUnits,DirectOwners,NestedOwners,OwnersSynced,Users,Guests,SPCount,Devices,NestedGroups,NestedInGroups,AppRoles,CAPs,EntraRoles,AzureRoles,Impact,Likelihood,Risk,Warnings | Out-File -Width 512 "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
     $tableOutput | select-object DisplayName,type,SecurityEnabled,RoleAssignable,OnPrem,Dynamic,Visibility,Protected,PIM,AuUnits,DirectOwners,NestedOwners,OwnersSynced,Users,Guests,SPCount,Devices,NestedGroups,NestedInGroups,AppRoles,CAPs,EntraRoles,AzureRoles,Impact,Likelihood,Risk,Warnings | Export-Csv -Path "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).csv" -NoTypeInformation
-    $DetailOutputTxt | Out-File -Width 512 -FilePath "$outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName).txt" -Append
 
     write-host "[+] Details of $($tableOutput.count) groups stored in output files (CSV,TXT,HTML): $outputFolder\$($Title)_$($StartTimestamp)_$($CurrentTenant.DisplayName)"
     If ($DynamicGroupsCount -gt 0) {
@@ -2358,7 +2450,6 @@ Appendix: Dynamic Groups
     }
        
     Remove-Variable Report
-    Remove-Variable DetailOutputTxt
     Remove-Variable tableOutput
     Remove-Variable AllGroupsDetails
     Remove-Variable details

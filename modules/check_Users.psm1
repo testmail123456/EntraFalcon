@@ -1244,7 +1244,7 @@ function Invoke-CheckUsers {
                 $DeviceDetails = $Devices[$object.id]
 
                 # Calc Max Length
-                $DiplayName = $userDetails.userPrincipalName
+                $DiplayName = $DeviceDetails.displayName
                 if ($null -ne $DisplayName -and $DisplayName.Length -gt $DiplayNameLength) {
                     $DiplayNameLength = $DisplayName.Length
                 }
@@ -1264,7 +1264,7 @@ function Invoke-CheckUsers {
             $formattedText = Format-ReportSection -Title "Owner of Devices" `
             -Objects $ReportingOwnerDevice `
             -Properties @("Displayname", "Type", "OS") `
-            -ColumnWidths @{ Displayname = [Math]::Min($DiplayNameLength, 30); Type = 15; OS = [Math]::Min($OsLength, 40) }
+            -ColumnWidths @{ Displayname = [Math]::Min($DiplayNameLength, 50); Type = 15; OS = [Math]::Min($OsLength, 40) }
             [void]$DetailTxtBuilder.AppendLine($formattedText)
         }
 
@@ -1278,7 +1278,7 @@ function Invoke-CheckUsers {
                 $DeviceDetails = $Devices[$object.id]
 
                 # Calc Max Length
-                $DiplayName = $userDetails.userPrincipalName
+                $DiplayName = $DeviceDetails.displayName
                 if ($null -ne $DisplayName -and $DisplayName.Length -gt $DiplayNameLength) {
                     $DiplayNameLength = $DisplayName.Length
                 }
@@ -1290,7 +1290,7 @@ function Invoke-CheckUsers {
                 [pscustomobject]@{ 
                     "Displayname" = $DiplayName
                     "Type" = $DeviceDetails.trustType
-                    "OS" = $OsLength
+                    "OS" = $Os
                 }
             }
 
@@ -1352,7 +1352,7 @@ function Invoke-CheckUsers {
             $formattedText = Format-ReportSection -Title "Directly Assigned AppRoles" `
             -Objects $ReportingAppRoles `
             -Properties @("AppRoleName", "Enabled", "Description", "App") `
-            -ColumnWidths @{ AppRoleName = [Math]::Min($maxDisplayNameLength, 40); Enabled = 7; Description = [Math]::Min($maxDisplayNameLength, 40); App = [Math]::Min($maxDisplayNameLength, 40)}
+            -ColumnWidths @{ AppRoleName = [Math]::Min($maxAppRoleNameLength, 40); Enabled = 7; Description = [Math]::Min($maxDescriptionLength, 40); App = [Math]::Min($maxAppNameLength, 40)}
             [void]$DetailTxtBuilder.AppendLine($formattedText)
 
             $ReportingAppRoles  = foreach ($obj in $ReportingAppRoles) {
@@ -1432,7 +1432,7 @@ function Invoke-CheckUsers {
         }
 
         ############### Azure Roles
-        if ($item.AzureRoles -ge 1 ) {
+        if (@($item.AzureRoleDetails).count -ge 1 ) {
             $ReportingAzureRoles = foreach ($object in $($item.AzureRoleDetails)) {
                 [pscustomobject]@{ 
                     "Role name" = $object.RoleName
