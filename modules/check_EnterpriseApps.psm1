@@ -18,6 +18,7 @@ function Invoke-CheckEnterpriseApps {
         [Parameter(Mandatory=$true)][hashtable]$AllGroupsDetails,
         [Parameter(Mandatory=$true)][Object[]]$CurrentTenant,
         [Parameter(Mandatory=$false)][hashtable]$AzureIAMAssignments,
+        [Parameter(Mandatory=$true)][hashtable]$AllUsersBasicHT,
         [Parameter(Mandatory=$true)][hashtable]$TenantRoleAssignments,
         [Parameter(Mandatory=$true)][String[]]$StartTimestamp
     )
@@ -1254,6 +1255,7 @@ function Invoke-CheckEnterpriseApps {
         [void]$DetailTxtBuilder.AppendLine("Last sign-in as application (resource): $lastSignInAppAsResource")
         [void]$DetailTxtBuilder.AppendLine("Last sign-in delegated (client): $lastSignInDelegatedAsClient")
         [void]$DetailTxtBuilder.AppendLine("Last sign-in delegated (resource): $lastSignInDelegatedAsResource ")
+        [void]$DetailTxtBuilder.AppendLine("")
 
 
         ############### Entra Roles
@@ -1271,7 +1273,7 @@ function Invoke-CheckEnterpriseApps {
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
             [void]$DetailTxtBuilder.AppendLine("Active Entra Role Assignments")
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingRoles | Out-String))
+            [void]$DetailTxtBuilder.AppendLine(($ReportingRoles | format-table | Out-String))
         }
     
 
@@ -1290,7 +1292,7 @@ function Invoke-CheckEnterpriseApps {
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
             [void]$DetailTxtBuilder.AppendLine("Azure IAM assignments")
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingAzureRoles | Out-String))
+            [void]$DetailTxtBuilder.AppendLine(($ReportingAzureRoles | format-table | Out-String))
         }
 
 
@@ -1546,20 +1548,46 @@ function Invoke-CheckEnterpriseApps {
 
         ############### API Delegated Permissions
         if ($($item.ApiDelegatedDetails | Measure-Object).count -ge 1) {
+
             $ReportingDelegatedApiPermission = foreach ($object in $($item.ApiDelegatedDetails)) {
+                
+                $userDetails = $AllUsersBasicHT[$object.Principal]
+                
+                # Check if a matching user was found
+                if ($userDetails) {
+                    $PrincipalUpn = $userDetails.UserPrincipalName
+                    $PrincipalUpnLink = "<a href=Users_$($StartTimestamp)_$([System.Uri]::EscapeDataString($CurrentTenant.DisplayName)).html#$($object.Principal)>$($PrincipalUpn)</a>"
+                } else {
+                    # Handle the case where no match was found
+                    $PrincipalUpn = $object.Principal
+                    $PrincipalUpnLink = $object.Principal
+                }
+
                 [pscustomobject]@{ 
-                    "API Name" = $($object.APIName)
-                    "Permission" = $($object.Scope)
-                    "Categorization" = $($object.ApiPermissionCategorization)
-                    "ConsentType" = $($object.ConsentType)
-                    "Principal" = $($object.Principal)
+                    "APIName" = $object.APIName
+                    "Permission" = $object.Scope
+                    "Categorization" = $object.ApiPermissionCategorization
+                    "ConsentType" = $object.ConsentType
+                    "Principal" = $PrincipalUpn
+                    "PrincipalLink" = $PrincipalUpnLink
                 }
             }
 
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
             [void]$DetailTxtBuilder.AppendLine("API Permission (Delegated)")
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingDelegatedApiPermission | format-table | Out-String))
+            [void]$DetailTxtBuilder.AppendLine(($ReportingDelegatedApiPermission | format-table APIName,Permission,Categorization,ConsentType,Principal | Out-String))
+
+            $ReportingDelegatedApiPermission = foreach ($obj in $ReportingDelegatedApiPermission) {
+              [pscustomobject]@{ 
+                    "APIName" = $obj.APIName
+                    "Permission" = $obj.Permission
+                    "Categorization" = $obj.Categorization
+                    "ConsentType" = $obj.ConsentType
+                    "Principal" = $obj.PrincipalLink
+                }
+            }
+
         }
 
         $ObjectDetails = [pscustomobject]@{

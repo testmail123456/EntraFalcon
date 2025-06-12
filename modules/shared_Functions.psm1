@@ -2332,7 +2332,24 @@ function Get-RegisterAuthMethodsUsers {
     return $UserAuthMethodsTable
 }
 
-#Get all Devices
+#Get all Users
+function Get-UsersBasic {
+     write-host "[*] Retrieve basic user list"
+
+    $QueryParameters = @{
+        '$select' = "Id,UserPrincipalName,UserType,accountEnabled,onPremisesSyncEnabled"
+        '$top' = "999"
+      }
+      $RawResponse = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/users" -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)
+    $AllUsersBasicHT = @{}
+    foreach ($user in $RawResponse) {
+        $AllUsersBasicHT[$user.id] = $user
+    }
+    
+    return $AllUsersBasicHT
+}
+
+#Get Basic User Infos
 function Get-Devices {
      write-host "[*] Retrieve devices"
 
@@ -3641,4 +3658,4 @@ function Show-EntraFalconBanner {
     Write-Host ""
 }
 
-Export-ModuleMember -Function Show-EntraFalconBanner,AuthenticationMSGraph,Get-Devices,start-CleanUp,Format-ReportSection,Get-OrgInfo,Write-LogVerbose,Invoke-AzureRoleProcessing,Get-RegisterAuthMethodsUsers,Invoke-EntraRoleProcessing,Get-EntraPIMRoleAssignments,AuthCheckMSGraph,RefreshAuthenticationMsGraph,Get-PimforGroupsAssignments,Invoke-CheckTokenExpiration,Invoke-MsGraphAuthPIM,EnsureAuthMsGraph,Get-AzureRoleDetails,Get-AdministrativeUnitsWithMembers,Get-ConditionalAccessPolicies,Get-EntraRoleAssignments,Get-APIPermissionCategory,Get-ObjectInfo,EnsureAuthAzurePsNative,checkSubscriptionNative,Get-AllAzureIAMAssignmentsNative,Get-PIMForGroupsAssignmentsDetails,Show-EnumerationSummary,start-InitTasks
+Export-ModuleMember -Function Show-EntraFalconBanner,AuthenticationMSGraph,Get-Devices,Get-UsersBasic,start-CleanUp,Format-ReportSection,Get-OrgInfo,Write-LogVerbose,Invoke-AzureRoleProcessing,Get-RegisterAuthMethodsUsers,Invoke-EntraRoleProcessing,Get-EntraPIMRoleAssignments,AuthCheckMSGraph,RefreshAuthenticationMsGraph,Get-PimforGroupsAssignments,Invoke-CheckTokenExpiration,Invoke-MsGraphAuthPIM,EnsureAuthMsGraph,Get-AzureRoleDetails,Get-AdministrativeUnitsWithMembers,Get-ConditionalAccessPolicies,Get-EntraRoleAssignments,Get-APIPermissionCategory,Get-ObjectInfo,EnsureAuthAzurePsNative,checkSubscriptionNative,Get-AllAzureIAMAssignmentsNative,Get-PIMForGroupsAssignmentsDetails,Show-EnumerationSummary,start-InitTasks
