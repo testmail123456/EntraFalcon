@@ -764,7 +764,7 @@ function Invoke-CheckAppRegistrations {
                 [void]$DetailTxtBuilder.AppendLine("================================================================================================")
                 [void]$DetailTxtBuilder.AppendLine("App Admins (Users)")
                 [void]$DetailTxtBuilder.AppendLine("================================================================================================")
-                [void]$DetailTxtBuilder.AppendLine(($ScopedAdminUser | format-table -Property Role,Scope,AssignmentType,UPN,Enabled,Type,OnPremSync,Department,JobTitle | Out-String))
+                [void]$DetailTxtBuilder.AppendLine(($ScopedAdminUser | format-table -Property Role,Scope,AssignmentType,UPN,Enabled,Type,OnPremSync,Department,JobTitle | Out-String -Width 200))
                 $ScopedAdminUser  = foreach ($obj in $ScopedAdminUser ) {
                     [pscustomobject]@{
                         Role            = $obj.Role
@@ -858,7 +858,7 @@ function Invoke-CheckAppRegistrations {
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
             [void]$DetailTxtBuilder.AppendLine("App Roles")
             [void]$DetailTxtBuilder.AppendLine("================================================================================================")
-            [void]$DetailTxtBuilder.AppendLine(($ReportingAppRoles | Out-String))
+            [void]$DetailTxtBuilder.AppendLine(($ReportingAppRoles | format-table | Out-String))
         }
 
         
