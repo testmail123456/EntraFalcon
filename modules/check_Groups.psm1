@@ -382,7 +382,7 @@ function Invoke-CheckGroups {
     Write-Host "[*] Get Groups"
     $QueryParameters = @{ 
         '$select' = 'Id,DisplayName,Visibility,GroupTypes,SecurityEnabled,IsAssignableToRole,OnPremisesSyncEnabled,MailEnabled,Description,MembershipRule'
-        '$top' = "999"
+        '$top' = $GLOBALTop
     }
     $AllGroups = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri '/groups' -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)
 
@@ -574,7 +574,7 @@ function Invoke-CheckGroups {
     #Basic ServicePrincipal Info to avoid storing the information in a large object
     $QueryParameters = @{
         '$select' = "id,displayName,accountEnabled,appOwnerOrganizationId,publisherName,servicePrincipalType"
-        '$top' = "999"
+        '$top' = $GLOBALTop
     }
     $RawResponse = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri '/servicePrincipals' -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)
     $AllSPBasicHT = @{}

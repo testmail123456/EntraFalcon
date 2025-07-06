@@ -165,12 +165,12 @@ function Invoke-CheckUsers {
     if ($PermissionUserSignInActivity) {
         $QueryParameters = @{
             '$select' = "Id,DisplayName,UserPrincipalName,AccountEnabled,UserType,AssignedLicenses,OtherMails,OnPremisesSyncEnabled,SignInActivity,CreatedDateTime,JobTitle,Department"
-            '$top' = "999"
+            '$top' = $GLOBALTop
         }
     } else {
         $QueryParameters = @{
             '$select' = "Id,DisplayName,UserPrincipalName,AccountEnabled,UserType,AssignedLicenses,OtherMails,OnPremisesSyncEnabled,CreatedDateTime,JobTitle,Department"
-            '$top' = "999"
+            '$top' = $GLOBALTop
         } 
     }
     $AllUsers = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/users" -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)

@@ -1,5 +1,12 @@
 # EntraFalcon
 
+MODIFIED:
+Run it with:
+
+```
+> .\run_EntraFalcon.ps1 -SkipPimForGroups -Top 100 -Tenant <TENANT_ID> -Verbose
+``` 
+
 ![alt text](/images/EntraFalcon_logo.png)
 
 EntraFalcon is a PowerShell-based assessment tool for pentesters, security analysts, and system administrators to evaluate the security posture of a Microsoft Entra ID environment.

@@ -81,6 +81,10 @@ Param (
     [Parameter(Mandatory=$false)]
     [switch]$QAMode = $false,
 
+    # MODIFIED: ask for top param
+    [Parameter(Mandatory = $false)]
+    [int]$Top,
+
     [Parameter(Mandatory = $false)]
     [switch]$ManualCode #Alias because of EntraTokenAid error message
 )
@@ -89,6 +93,22 @@ Param (
 if ($ManualCode.IsPresent) {
     $AuthMethod = "ManualCode"
 }
+
+# MODIFIED: graph Tokens from AZ PowerShell
+$MSGraphAT = Get-AzAccessToken -ResourceTypeName MSGraph
+$ARMAT = Get-AzAccessToken
+
+$global:GLOBALMsGraphAccessToken = [PSCustomObject]@{
+    access_token = $MSGraphAT.Token
+    Expiration_time = [DateTimeOffset]::Parse($MSGraphAT.ExpiresOn).DateTime
+}
+
+$global:GLOBALArmAccessToken = [PSCustomObject]@{
+    access_token = $ARMAT.Token
+    Expiration_time = [DateTimeOffset]::Parse($ARMAT.ExpiresOn).DateTime
+}
+
+$global:GLOBALTop = $Top
 
 #Constants
 $EntraFalconVersion = "V20250612"
@@ -178,9 +198,12 @@ if (-not (Test-Path -Path $OutputFolder)) {
 
 $AdminUnitWithMembers = Get-AdministrativeUnitsWithMembers
 $Caps = Get-ConditionalAccessPolicies
-# Get PIM eligible role assignments
-if (Invoke-MsGraphAuthPIM) {
-    $TenantPimRoleAssignments = Get-EntraPIMRoleAssignments
+# MODIFIED to ensure that it perform this only if a valid refresh token is present
+if ($GLOBALMsGraphAccessToken -and $GLOBALMsGraphAccessToken.refresh_token) {
+    # Get PIM eligible role assignments
+    if (Invoke-MsGraphAuthPIM) {
+        $TenantPimRoleAssignments = Get-EntraPIMRoleAssignments
+    }
 }
 #Get active role assignments and merge eligible
 $TenantRoleAssignments = Get-EntraRoleAssignments -TenantPimRoleAssignments $TenantPimRoleAssignments

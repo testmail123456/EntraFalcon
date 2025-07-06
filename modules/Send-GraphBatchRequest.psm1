@@ -185,6 +185,30 @@ function Send-GraphBatchRequest {
                 $Response = Invoke-RestMethod @irmParams
                 $PendingRequests = @()
             } catch {
+                # MODIFIED: for debugging purposes
+                Write-Host "`n`n`n`n[*] Request [$Method]: $($irmParams | ConvertTo-Json -Depth 10)"
+                Write-Host "[*] Response : StatusCode = $StatusCode ; StatusDesc = $StatusDesc)"
+                $webResponse = $_.Exception.Response
+                if ($webResponse -is [System.Net.HttpWebResponse]) {
+                    # Read and print response body
+                    $stream = $webResponse.GetResponseStream()
+                    $reader = New-Object System.IO.StreamReader($stream)
+                    $errorBody = $reader.ReadToEnd()
+                    
+
+                    # Print status code
+                    Write-Host "`n[!] Status Code: $($webResponse.StatusCode) ($($webResponse.StatusDescription))"
+
+                    # Print headers
+                    Write-Host "`n[!] Response:"
+                    foreach ($key in $webResponse.Headers.Keys) {
+                        Write-Host "$key : $($webResponse.Headers[$key])"
+                    }
+                    Write-Host "`n`n$errorBody`n`n`n`n"
+                } else {
+                    Write-Host "[!] Exception Message:" $_.Exception.Message
+                }
+
                 Write-Error "Batch request failed: $_"
                 return
             }

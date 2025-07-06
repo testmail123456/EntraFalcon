@@ -107,7 +107,7 @@ function Invoke-CheckEnterpriseApps {
     $QueryParameters = @{
         '$filter' = "ServicePrincipalType eq 'Application'"
         '$select' = "Id,DisplayName,PublisherName,accountEnabled,AppRoles,AppId,servicePrincipalType,signInAudience,AppOwnerOrganizationId,PasswordCredentials,KeyCredentials,AppRoleAssignmentRequired"
-        '$top' = "999"
+        '$top' = $GLOBALTop
     }
     $EnterpriseApps = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri '/servicePrincipals' -QueryParameters $QueryParameters -BetaAPI -UserAgent $($GlobalAuditSummary.UserAgent.Name)
 
@@ -169,7 +169,7 @@ function Invoke-CheckEnterpriseApps {
     }
 
     write-host "[*] Get last app last sign-in dates"
-    $AppLastSignInsRaw = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/reports/servicePrincipalSignInActivities" -BetaAPI -QueryParameters @{ '$top' = "999" } -UserAgent $($GlobalAuditSummary.UserAgent.Name)
+    $AppLastSignInsRaw = Send-GraphRequest -AccessToken $GLOBALMsGraphAccessToken.access_token -Method GET -Uri "/reports/servicePrincipalSignInActivities" -BetaAPI -QueryParameters @{ '$top' = $GLOBALTop } -UserAgent $($GlobalAuditSummary.UserAgent.Name)
     foreach ($app in $AppLastSignInsRaw) {
         $AppLastSignIns[$app.appId] = @{
             id = $app.appId
